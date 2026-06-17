@@ -1,0 +1,76 @@
+{
+    "name": "vora-lang",
+    "displayName": "Vora",
+    "description": "Vora language support — syntax highlighting, diagnostics, formatting, and more",
+    "version": "0.1.0",
+    "publisher": "vora-lang",
+    "license": "MIT",
+    "icon": "vora_logo.png",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Vora-lang/Vora-LSP"
+    },
+    "engines": {
+        "vscode": "^1.82.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "activationEvents": [
+        "onLanguage:vora"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "languages": [
+            {
+                "id": "vora",
+                "aliases": [
+                    "Vora",
+                    "vora"
+                ],
+                "extensions": [
+                    ".va"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "vora",
+                "scopeName": "source.vora",
+                "path": "./syntaxes/vora.tmLanguage.json"
+            }
+        ],
+        "configuration": {
+            "title": "Vora",
+            "properties": {
+                "vora.lsp.serverPath": {
+                    "type": "string",
+                    "default": "vora-lsp",
+                    "description": "Path to the Vora LSP server executable."
+                },
+                "vora.lsp.trace.server": {
+                    "type": "string",
+                    "default": "off",
+                    "enum": [
+                        "off",
+                        "messages",
+                        "verbose"
+                    ],
+                    "description": "Traces the communication between VS Code and the Vora LSP server."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.82.0",
+        "typescript": "^5.3.0",
+        "vscode-languageclient": "^9.0.0"
+    }
+}
