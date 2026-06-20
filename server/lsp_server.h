@@ -26,6 +26,13 @@
 #include <unordered_map>
 #include <vector>
 
+// Forward declarations — actual types are in Vora's lexer/ast headers.
+namespace vora {
+    struct Token;
+    class Stmt;
+    class Program;
+}
+
 namespace vora::lsp {
 
 /// Per-document state tracked by the LSP server.
@@ -115,11 +122,24 @@ private:
     // ── Diagnostics ─────────────────────────────────────────────────────
     void publishDiagnostics(const std::string& uri);
 
+    // ── Symbol collection ───────────────────────────────────────────────
+    void collectSymbols(const Stmt* stmt, nlohmann::json& symbols);
+    void collectSymbolsFromProgram(const Program& program, nlohmann::json& symbols);
+
+    // ── Completion data ─────────────────────────────────────────────────
+    nlohmann::json getKeywordCompletions() const;
+    nlohmann::json getBuiltinCompletions() const;
+
+    // ── Definition ──────────────────────────────────────────────────────
+    nlohmann::json findDefinition(const std::string& source,
+                                   int searchLine, int searchCol);
+
     // ── Helpers ─────────────────────────────────────────────────────────
     void log(const std::string& message);
     DocumentState* getDocument(const std::string& uri);
-    nlohmann::json positionToLsp(int line, int column);
-    int lspPositionToOffset(const std::string& text, int line, int character);
+    static nlohmann::json tokenToLspRange(const Token& token);
+    static int lspPositionToOffset(const std::string& text, int line, int character);
+    static nlohmann::json offsetToLspPosition(const std::string& text, int offset);
 };
 
 }  // namespace vora::lsp
