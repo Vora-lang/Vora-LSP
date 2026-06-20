@@ -3,33 +3,22 @@
     "name": "Vora",
     "scopeName": "source.vora",
     "patterns": [
-        {
-            "include": "#comments"
-        },
-        {
-            "include": "#strings"
-        },
-        {
-            "include": "#numbers"
-        },
-        {
-            "include": "#keywords"
-        },
-        {
-            "include": "#constants"
-        },
-        {
-            "include": "#operators"
-        },
-        {
-            "include": "#function-declaration"
-        },
-        {
-            "include": "#type-annotation"
-        },
-        {
-            "include": "#property-access"
-        }
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#constants" },
+        { "include": "#builtin-functions" },
+        { "include": "#operators" },
+        { "include": "#class-declaration" },
+        { "include": "#function-declaration" },
+        { "include": "#variable-declaration" },
+        { "include": "#import-export" },
+        { "include": "#lambda-expression" },
+        { "include": "#control-structures" },
+        { "include": "#type-annotation" },
+        { "include": "#property-access" },
+        { "include": "#punctuation" }
     ],
     "repository": {
         "comments": {
@@ -41,7 +30,13 @@
                 {
                     "name": "comment.block.vora",
                     "begin": "/\\*",
-                    "end": "\\*/"
+                    "end": "\\*/",
+                    "patterns": [
+                        {
+                            "name": "comment.block.documentation.vora",
+                            "match": "(?<=/\\*\\*)\\s*\\S.*$"
+                        }
+                    ]
                 }
             ]
         },
@@ -54,11 +49,19 @@
                     "patterns": [
                         {
                             "name": "constant.character.escape.vora",
-                            "match": "\\\\."
+                            "match": "\\\\[\\\\\"'0nrbt]"
+                        },
+                        {
+                            "name": "constant.character.escape.unicode.vora",
+                            "match": "\\\\u[0-9a-fA-F]{4}"
                         },
                         {
                             "name": "constant.character.escape.interpolation.vora",
-                            "match": "\\$\\{"
+                            "begin": "\\$\\{",
+                            "end": "\\}",
+                            "patterns": [
+                                { "include": "$self" }
+                            ]
                         }
                     ]
                 },
@@ -69,7 +72,7 @@
                     "patterns": [
                         {
                             "name": "constant.character.escape.vora",
-                            "match": "\\\\."
+                            "match": "\\\\[\\\\\"'0nrbt]"
                         }
                     ]
                 }
@@ -78,40 +81,56 @@
         "numbers": {
             "patterns": [
                 {
-                    "name": "constant.numeric.float.vora",
-                    "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
-                },
-                {
                     "name": "constant.numeric.hex.vora",
-                    "match": "\\b0[xX][0-9a-fA-F]+\\b"
+                    "match": "\\b0[xX][0-9a-fA-F][0-9a-fA-F_]*\\b"
                 },
                 {
                     "name": "constant.numeric.octal.vora",
-                    "match": "\\b0[oO][0-7]+\\b"
+                    "match": "\\b0[oO][0-7][0-7_]*\\b"
                 },
                 {
                     "name": "constant.numeric.binary.vora",
-                    "match": "\\b0[bB][01]+\\b"
+                    "match": "\\b0[bB][01][01_]*\\b"
+                },
+                {
+                    "name": "constant.numeric.float.vora",
+                    "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?\\b"
                 },
                 {
                     "name": "constant.numeric.integer.vora",
-                    "match": "\\b[0-9]+\\b"
+                    "match": "\\b[0-9][0-9_]*\\b"
                 }
             ]
         },
         "keywords": {
             "patterns": [
                 {
-                    "name": "keyword.control.vora",
-                    "match": "\\b(let|const|func|return|if|else|while|for|in|break|continue|throw|try|catch|finally|import|export|from|as|yield)\\b"
+                    "name": "keyword.control.conditional.vora",
+                    "match": "\\b(if|else)\\b"
                 },
                 {
-                    "name": "keyword.other.vora",
-                    "match": "\\b(Obj|this|super|new|class)\\b"
+                    "name": "keyword.control.loop.vora",
+                    "match": "\\b(while|for|in|break|continue)\\b"
                 },
                 {
-                    "name": "storage.modifier.vora",
-                    "match": "\\b(export|import)\\b"
+                    "name": "keyword.control.flow.vora",
+                    "match": "\\b(return|yield)\\b"
+                },
+                {
+                    "name": "keyword.control.exception.vora",
+                    "match": "\\b(try|catch|finally|throw)\\b"
+                },
+                {
+                    "name": "storage.type.vora",
+                    "match": "\\b(let|const|func|Obj)\\b"
+                },
+                {
+                    "name": "keyword.control.import.vora",
+                    "match": "\\b(import|export|from|as)\\b"
+                },
+                {
+                    "name": "variable.language.vora",
+                    "match": "\\b(this|super)\\b"
                 }
             ]
         },
@@ -131,11 +150,23 @@
                 }
             ]
         },
+        "builtin-functions": {
+            "patterns": [
+                {
+                    "name": "support.function.builtin.vora",
+                    "match": "\\b(print|type|int|float|toString|len|clock|assert|input|range|bin|oct|hex|iter|next)\\s*(?=\\()"
+                }
+            ]
+        },
         "operators": {
             "patterns": [
                 {
-                    "name": "keyword.operator.assignment.vora",
-                    "match": "\\+=|-=|\\*=|/=|%=|="
+                    "name": "keyword.operator.assignment.compound.vora",
+                    "match": "\\+=|-=|\\*=|/=|%="
+                },
+                {
+                    "name": "keyword.operator.increment.vora",
+                    "match": "\\+\\+|--"
                 },
                 {
                     "name": "keyword.operator.comparison.vora",
@@ -147,15 +178,19 @@
                 },
                 {
                     "name": "keyword.operator.arithmetic.vora",
-                    "match": "\\+\\+|--|\\*\\*|[+\\-*/%]"
+                    "match": "\\*\\*|[+\\-*/%](?![+\\-*/%])"
+                },
+                {
+                    "name": "keyword.operator.assignment.vora",
+                    "match": "=(?!=)"
                 },
                 {
                     "name": "keyword.operator.ternary.vora",
                     "match": "\\?|:"
                 },
                 {
-                    "name": "punctuation.accessor.vora",
-                    "match": "\\."
+                    "name": "keyword.operator.spread.vora",
+                    "match": "\\.\\.\\."
                 }
             ]
         },
@@ -163,17 +198,173 @@
             "patterns": [
                 {
                     "name": "meta.function.vora",
-                    "begin": "\\b(func)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "begin": "\\b(func)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)",
                     "end": "(?=\\{|\\(|$)",
                     "beginCaptures": {
-                        "1": { "name": "keyword.control.vora" },
+                        "1": { "name": "storage.type.vora" },
                         "2": { "name": "entity.name.function.vora" }
                     },
                     "patterns": [
                         {
-                            "include": "$self"
+                            "name": "meta.function.parameters.vora",
+                            "begin": "\\(",
+                            "end": "\\)",
+                            "patterns": [
+                                { "include": "$self" }
+                            ]
                         }
                     ]
+                }
+            ]
+        },
+        "variable-declaration": {
+            "patterns": [
+                {
+                    "name": "meta.variable-declaration.vora",
+                    "begin": "\\b(let|const)\\s+",
+                    "end": "(?=[=;,)}\\\\s]|$)",
+                    "beginCaptures": {
+                        "1": { "name": "storage.type.vora" }
+                    },
+                    "patterns": [
+                        {
+                            "name": "variable.other.readwrite.vora",
+                            "match": "[a-zA-Z_$][a-zA-Z0-9_$]*"
+                        }
+                    ]
+                }
+            ]
+        },
+        "lambda-expression": {
+            "patterns": [
+                {
+                    "name": "meta.function.anonymous.vora",
+                    "begin": "\\b(func)\\s*(?=\\()",
+                    "end": "(?=\\{)",
+                    "beginCaptures": {
+                        "1": { "name": "storage.type.vora" }
+                    },
+                    "patterns": [
+                        {
+                            "name": "meta.function.parameters.vora",
+                            "begin": "\\(",
+                            "end": "\\)",
+                            "patterns": [
+                                { "include": "$self" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        "class-declaration": {
+            "patterns": [
+                {
+                    "name": "meta.class.vora",
+                    "begin": "\\b(Obj)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)",
+                    "end": "(?=\\{)",
+                    "beginCaptures": {
+                        "1": { "name": "storage.type.vora" },
+                        "2": { "name": "entity.name.class.vora" }
+                    },
+                    "patterns": [
+                        {
+                            "name": "meta.class.inheritance.vora",
+                            "match": "\\s*:\\s*([a-zA-Z_$][a-zA-Z0-9_$]*(\\s*,\\s*[a-zA-Z_$][a-zA-Z0-9_$]*)*)",
+                            "captures": {
+                                "1": { "name": "entity.other.inherited-class.vora" }
+                            }
+                        },
+                        {
+                            "name": "meta.class.parameters.vora",
+                            "begin": "\\(",
+                            "end": "\\)",
+                            "patterns": [
+                                { "include": "$self" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        "import-export": {
+            "patterns": [
+                {
+                    "name": "meta.import.vora",
+                    "match": "\\b(import)\\s+(\"[^\"]*\")",
+                    "captures": {
+                        "1": { "name": "keyword.control.import.vora" },
+                        "2": { "name": "string.quoted.double.vora" }
+                    }
+                },
+                {
+                    "name": "meta.import-from.vora",
+                    "match": "\\b(from)\\s+(\"[^\"]*\")\\s+(import)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)",
+                    "captures": {
+                        "1": { "name": "keyword.control.import.vora" },
+                        "2": { "name": "string.quoted.double.vora" },
+                        "3": { "name": "keyword.control.import.vora" },
+                        "4": { "name": "variable.other.readwrite.vora" }
+                    }
+                },
+                {
+                    "name": "meta.export.vora",
+                    "match": "\\b(export)\\s+(func|let|const|Obj)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)",
+                    "captures": {
+                        "1": { "name": "keyword.control.import.vora" },
+                        "2": { "name": "storage.type.vora" },
+                        "3": { "name": "entity.name.function.vora" }
+                    }
+                }
+            ]
+        },
+        "control-structures": {
+            "patterns": [
+                {
+                    "name": "meta.for-in.vora",
+                    "match": "\\b(for)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\\s+(in)\\b",
+                    "captures": {
+                        "1": { "name": "keyword.control.loop.vora" },
+                        "2": { "name": "variable.other.readwrite.vora" },
+                        "3": { "name": "keyword.control.loop.vora" }
+                    }
+                },
+                {
+                    "name": "meta.for-c.vora",
+                    "begin": "\\b(for)\\s*(\\()",
+                    "end": "\\)",
+                    "beginCaptures": {
+                        "1": { "name": "keyword.control.loop.vora" },
+                        "2": { "name": "punctuation.definition.group.vora" }
+                    },
+                    "endCaptures": {
+                        "0": { "name": "punctuation.definition.group.vora" }
+                    },
+                    "patterns": [
+                        { "include": "$self" }
+                    ]
+                },
+                {
+                    "name": "meta.try.vora",
+                    "match": "\\b(try)\\b",
+                    "captures": {
+                        "1": { "name": "keyword.control.exception.vora" }
+                    }
+                },
+                {
+                    "name": "meta.catch.vora",
+                    "match": "\\b(catch)\\s*(?:\\(([a-zA-Z_$][a-zA-Z0-9_$]*)\\))?",
+                    "captures": {
+                        "1": { "name": "keyword.control.exception.vora" },
+                        "2": { "name": "variable.other.readwrite.vora" }
+                    }
+                },
+                {
+                    "name": "meta.finally.vora",
+                    "match": "\\b(finally)\\b",
+                    "captures": {
+                        "1": { "name": "keyword.control.exception.vora" }
+                    }
                 }
             ]
         },
@@ -181,12 +372,20 @@
             "patterns": [
                 {
                     "name": "meta.type-annotation.vora",
-                    "match": "\\b(let|const)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "match": "\\b(let|const)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\\s*(:)\\s*([a-zA-Z_$][a-zA-Z0-9_$]*)",
                     "captures": {
-                        "1": { "name": "keyword.control.vora" },
-                        "2": { "name": "variable.other.vora" },
-                        "3": { "name": "keyword.operator.vora" },
+                        "1": { "name": "storage.type.vora" },
+                        "2": { "name": "variable.other.readwrite.vora" },
+                        "3": { "name": "keyword.operator.colon.vora" },
                         "4": { "name": "support.type.vora" }
+                    }
+                },
+                {
+                    "name": "meta.function.return-type.vora",
+                    "match": "\\)\\s*(:)\\s*([a-zA-Z_$][a-zA-Z0-9_$]*)",
+                    "captures": {
+                        "1": { "name": "keyword.operator.colon.vora" },
+                        "2": { "name": "support.type.vora" }
                     }
                 }
             ]
@@ -195,10 +394,46 @@
             "patterns": [
                 {
                     "name": "meta.property-access.vora",
-                    "match": "\\.([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "match": "\\.\\s*([a-zA-Z_$][a-zA-Z0-9_$]*)",
                     "captures": {
                         "1": { "name": "variable.other.property.vora" }
                     }
+                }
+            ]
+        },
+        "punctuation": {
+            "patterns": [
+                {
+                    "name": "punctuation.definition.group.vora",
+                    "match": "\\("
+                },
+                {
+                    "name": "punctuation.definition.group.vora",
+                    "match": "\\)"
+                },
+                {
+                    "name": "punctuation.definition.brace.vora",
+                    "match": "\\{"
+                },
+                {
+                    "name": "punctuation.definition.brace.vora",
+                    "match": "\\}"
+                },
+                {
+                    "name": "punctuation.definition.bracket.vora",
+                    "match": "\\["
+                },
+                {
+                    "name": "punctuation.definition.bracket.vora",
+                    "match": "\\]"
+                },
+                {
+                    "name": "punctuation.separator.comma.vora",
+                    "match": ","
+                },
+                {
+                    "name": "punctuation.terminator.semicolon.vora",
+                    "match": ";"
                 }
             ]
         }

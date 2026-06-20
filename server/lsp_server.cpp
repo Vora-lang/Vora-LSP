@@ -299,11 +299,15 @@ void LspServer::publishDiagnostics(const std::string& uri) {
     Lexer lexer(doc->text, collector);
     auto tokens = lexer.scanTokens();
 
+    // Save error state BEFORE taking diagnostics (takeDiagnostics empties
+    // the vector, which makes hadError() return false).
+    bool lexHadError = lexer.hasError();
+
     // Collect lexer errors.
     auto lexDiags = collector.takeDiagnostics();
 
     // ── Parse ────────────────────────────────────────────────────────────
-    if (!lexer.hasError()) {
+    if (!lexHadError) {
         // Only parse if lexing succeeded (avoids cascading parse errors
         // from garbage tokens).
         Parser parser(std::move(tokens), collector);
