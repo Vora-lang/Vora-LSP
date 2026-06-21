@@ -5,9 +5,9 @@
  * Diagnostics use the Vora lexer + error-tolerant parser to surface
  * parse errors. Formatting delegates to SourceFormatter.
  *
- * Completion, go-to-definition, hover, and document symbols return
- * empty/not-implemented responses — they require semantic analysis
- * (roadmap #4).
+ * Completion, go-to-definition, hover, and document symbols are now
+ * backed by the SemanticAnalyzer for scope-aware resolution.
+ * References and signature help are also implemented.
  */
 
 #include "lsp_server.h"
@@ -15,12 +15,14 @@
 #include "lexer/lexer.h"
 #include "parser/parser.h"
 #include "formatter/formatter.h"
+#include "lsp/semantic_analyzer.h"
 #include "ast/stmt.h"
 #include "ast/expr.h"
 #include "ast/program.h"
 
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #include <unordered_set>
 
@@ -75,6 +77,10 @@ LspServer::LspServer() {
         [this](const nlohmann::json& p) { return handleFormatting(p); });
     router_.registerRequest("textDocument/documentSymbol",
         [this](const nlohmann::json& p) { return handleDocumentSymbol(p); });
+    router_.registerRequest("textDocument/references",
+        [this](const nlohmann::json& p) { return handleReferences(p); });
+    router_.registerRequest("textDocument/signatureHelp",
+        [this](const nlohmann::json& p) { return handleSignatureHelp(p); });
 
     // Also register the shorthand forms that some clients send.
     router_.registerRequest("shutdown",
@@ -112,8 +118,19 @@ void LspServer::run() {
 // Lifecycle handlers
 // ═══════════════════════════════════════════════════════════════════════════
 
-nlohmann::json LspServer::handleInitialize(const nlohmann::json& /*params*/) {
+nlohmann::json LspServer::handleInitialize(const nlohmann::json& params) {
     initialized_ = true;
+
+    // Capture workspace root for import resolution.
+    if (params.contains("rootUri") && params["rootUri"].is_string()) {
+        workspaceRoot_ = params["rootUri"].get<std::string>();
+        // Strip file:// prefix if present.
+        if (workspaceRoot_.rfind("file://", 0) == 0) {
+            workspaceRoot_ = workspaceRoot_.substr(7);
+        }
+    } else if (params.contains("rootPath") && params["rootPath"].is_string()) {
+        workspaceRoot_ = params["rootPath"].get<std::string>();
+    }
 
     nlohmann::json result;
     result["capabilities"]["textDocumentSync"]["openClose"] = true;
@@ -128,6 +145,11 @@ nlohmann::json LspServer::handleInitialize(const nlohmann::json& /*params*/) {
     result["capabilities"]["hoverProvider"] = true;
     result["capabilities"]["documentFormattingProvider"] = true;
     result["capabilities"]["documentSymbolProvider"] = true;
+    result["capabilities"]["referencesProvider"] = true;
+    result["capabilities"]["signatureHelpProvider"]["triggerCharacters"] =
+        nlohmann::json::array({"(", ","});
+    result["capabilities"]["signatureHelpProvider"]["retriggerCharacters"] =
+        nlohmann::json::array({")"});
 
     result["serverInfo"]["name"] = serverName_;
     result["serverInfo"]["version"] = serverVersion_;
@@ -190,6 +212,11 @@ void LspServer::handleDidChange(const nlohmann::json& params) {
     if (!changes.empty()) {
         doc->text = changes.back()["text"].get<std::string>();
     }
+
+    // Invalidate cached analysis.
+    doc->cacheValid = false;
+    doc->cachedProgram.reset();
+    doc->cachedAnalyzer.reset();
 
     publishDiagnostics(uri);
 }
@@ -277,47 +304,72 @@ nlohmann::json LspServer::handleCompletion(const nlohmann::json& params) {
         addMethod("has", "Dict method: check if key exists");
     }
 
-    // ── Context-sensitive: local variable names ─────────────────────────
-    // Parse the document and find variables visible at cursor position.
-    // We do a simple scan: parse, then walk declarations to find
-    // variables whose range contains the cursor (within scoping rules).
-    {
-        DiagnosticCollector collector;
-        Lexer lexer(doc->text, collector);
-        auto tokens = lexer.scanTokens();
-        if (!lexer.hasError()) {
-            Parser parser(std::move(tokens), collector);
-            parser.setSource(doc->text);
-            auto program = parser.parse();
-            // Walk top-level declarations to find variables
-            for (auto& s : program->statements) {
-                if (auto* let = dynamic_cast<LetStmt*>(s.get())) {
-                    // Check if cursor is after this declaration (within function scope)
-                    if (let->nameToken.line > 0 && line + 1 >= let->nameToken.line) {
-                        nlohmann::json item;
-                        item["label"] = let->name;
-                        item["kind"] = let->isConst ? 14 : 6;  // Constant or Variable
-                        item["detail"] = let->isConst ? "const (local)" : "let (local)";
-                        items.push_back(std::move(item));
-                    }
-                } else if (auto* func = dynamic_cast<FuncStmt*>(s.get())) {
-                    if (func->nameToken.line > 0 && line + 1 >= func->nameToken.line) {
-                        nlohmann::json item;
-                        item["label"] = func->name;
-                        item["kind"] = 3;  // Function
-                        item["detail"] = "function";
-                        items.push_back(std::move(item));
-                    }
-                } else if (auto* obj = dynamic_cast<ObjStmt*>(s.get())) {
-                    if (obj->nameToken.line > 0 && line + 1 >= obj->nameToken.line) {
-                        nlohmann::json item;
-                        item["label"] = obj->name;
-                        item["kind"] = 7;  // Class
-                        item["detail"] = "class";
-                        items.push_back(std::move(item));
-                    }
-                }
+    // ── Scope-aware: visible symbols from semantic analysis ────────────
+    parseAndAnalyze(uri);
+    if (doc->cacheValid && doc->cachedAnalyzer) {
+        int voraLine = line + 1;
+        int voraCol = character + 1;
+
+        auto visibleSymbols = doc->cachedAnalyzer->getVisibleSymbols(voraLine, voraCol);
+
+        for (auto* sym : visibleSymbols) {
+            nlohmann::json item;
+            item["label"] = sym->name;
+
+            // Map SymbolKind to LSP CompletionItemKind.
+            switch (sym->kind) {
+                case SymbolKind::Variable:  item["kind"] = 6;  break;  // Variable
+                case SymbolKind::Constant:  item["kind"] = 14; break;  // Constant
+                case SymbolKind::Function:  item["kind"] = 3;  break;  // Function
+                case SymbolKind::Parameter: item["kind"] = 6;  break;  // Variable
+                case SymbolKind::Object:    item["kind"] = 7;  break;  // Class
+                case SymbolKind::Method:    item["kind"] = 2;  break;  // Method
+                case SymbolKind::Import:    item["kind"] = 9;  break;  // Module
+                case SymbolKind::ForVar:    item["kind"] = 6;  break;  // Variable
+                case SymbolKind::CatchVar:  item["kind"] = 6;  break;  // Variable
             }
+
+            // Build detail string.
+            std::string detail;
+            switch (sym->kind) {
+                case SymbolKind::Variable:  detail = "let " + sym->name; break;
+                case SymbolKind::Constant:  detail = "const " + sym->name; break;
+                case SymbolKind::Function:
+                    detail = "func " + sym->name + "(";
+                    for (size_t pi = 0; pi < sym->paramNames.size(); pi++) {
+                        if (pi > 0) detail += ", ";
+                        detail += sym->paramNames[pi];
+                    }
+                    detail += ")";
+                    break;
+                case SymbolKind::Object:
+                    detail = "Obj " + sym->name;
+                    if (!sym->parentNames.empty()) {
+                        detail += " : " + sym->parentNames[0];
+                    }
+                    break;
+                case SymbolKind::Method:
+                    detail = "method " + sym->name;
+                    break;
+                case SymbolKind::Import:
+                    detail = "import \"" + sym->importPath + "\"";
+                    break;
+                case SymbolKind::Parameter:
+                    detail = "param " + sym->name;
+                    break;
+                default:
+                    detail = sym->name;
+                    break;
+            }
+            if (!sym->typeHint.empty()) {
+                detail += ": " + sym->typeHint;
+            }
+            item["detail"] = detail;
+
+            // Sort: same-scope items first (use scope level as sort key).
+            item["sortText"] = std::to_string(sym->scopeLevel) + "_" + sym->name;
+
+            items.push_back(std::move(item));
         }
     }
 
@@ -333,10 +385,41 @@ nlohmann::json LspServer::handleDefinition(const nlohmann::json& params) {
     int line = params["position"]["line"].get<int>();
     int character = params["position"]["character"].get<int>();
 
-    auto location = findDefinition(doc->text, line, character);
-    if (!location.is_null() && location.contains("uri") && location["uri"].get<std::string>().empty()) {
-        location["uri"] = uri;
+    parseAndAnalyze(uri);
+    if (!doc->cacheValid || !doc->cachedAnalyzer) return nullptr;
+
+    int voraLine = line + 1;
+    int voraCol = character + 1;
+
+    const auto* symbol = doc->cachedAnalyzer->findDeclarationAt(voraLine, voraCol);
+    if (!symbol) return nullptr;
+
+    // Convert to LSP location.
+    nlohmann::json location;
+    location["uri"] = uri;
+    location["range"] = tokenToLspRange(symbol->declToken);
+
+    // If it's an import, try cross-file resolution.
+    if (symbol->kind == SymbolKind::Import && !symbol->importPath.empty()) {
+        std::string importFilePath = resolveImportPath(uri, symbol->importPath);
+        auto* importedAnalyzer = analyzeImportedFile(importFilePath);
+        if (importedAnalyzer) {
+            // Return all exported symbols from the imported file as a list.
+            auto& exported = importedAnalyzer->getExportedSymbols();
+            if (exported.size() == 1) {
+                // Single export — point directly to it.
+                std::string fileUri = "file:///" + importFilePath;
+                location["uri"] = fileUri;
+                location["range"] = tokenToLspRange(exported[0]->declToken);
+            } else if (!exported.empty()) {
+                // Multiple exports — return the first one (client can show list).
+                std::string fileUri = "file:///" + importFilePath;
+                location["uri"] = fileUri;
+                location["range"] = tokenToLspRange(exported[0]->declToken);
+            }
+        }
     }
+
     return location;
 }
 
@@ -435,66 +518,96 @@ nlohmann::json LspServer::handleHover(const nlohmann::json& params) {
         return result;
     }
 
-    // ── Check for function / variable declarations in this file ─────────
-    {
-        DiagnosticCollector collector;
-        Lexer lexer(doc->text, collector);
-        auto tokens = lexer.scanTokens();
-        if (!lexer.hasError()) {
-            Parser parser(std::move(tokens), collector);
-            parser.setSource(doc->text);
-            auto program = parser.parse();
-            for (auto& s : program->statements) {
-                if (auto* func = dynamic_cast<FuncStmt*>(s.get())) {
-                    if (func->name == word) {
-                        // Build signature string
-                        std::string sig = "**func " + func->name + "(";
-                        for (size_t i = 0; i < func->params.size(); i++) {
-                            if (i > 0) sig += ", ";
-                            if (func->params[i].isRest) sig += "...";
-                            sig += func->params[i].name;
-                            if (func->params[i].defaultValue) sig += " = ...";
-                        }
-                        sig += ")**";
-                        nlohmann::json result;
-                        result["contents"]["kind"] = "markdown";
-                        result["contents"]["value"] = sig;
-                        return result;
+    // ── Check for function / variable declarations via semantic analysis ─
+    parseAndAnalyze(uri);
+    if (doc->cacheValid && doc->cachedAnalyzer) {
+        int voraLine = line + 1;
+        int voraCol = character + 1;
+
+        const auto* symbol = doc->cachedAnalyzer->findSymbolAt(voraLine, voraCol);
+        if (symbol) {
+            std::string hoverText;
+            switch (symbol->kind) {
+                case SymbolKind::Function: {
+                    hoverText = "**func " + symbol->name + "(";
+                    for (size_t i = 0; i < symbol->paramNames.size(); i++) {
+                        if (i > 0) hoverText += ", ";
+                        hoverText += symbol->paramNames[i];
                     }
-                } else if (auto* obj = dynamic_cast<ObjStmt*>(s.get())) {
-                    if (obj->name == word) {
-                        std::string sig = "**Obj " + obj->name;
-                        if (!obj->parentNames.empty()) {
-                            sig += " : ";
-                            for (size_t i = 0; i < obj->parentNames.size(); i++) {
-                                if (i > 0) sig += ", ";
-                                sig += obj->parentNames[i];
-                            }
+                    if (symbol->hasRestParam) hoverText += "...";
+                    hoverText += ")**";
+                    break;
+                }
+                case SymbolKind::Object: {
+                    hoverText = "**Obj " + symbol->name;
+                    if (!symbol->parentNames.empty()) {
+                        hoverText += " : ";
+                        for (size_t i = 0; i < symbol->parentNames.size(); i++) {
+                            if (i > 0) hoverText += ", ";
+                            hoverText += symbol->parentNames[i];
                         }
-                        sig += "(";
-                        for (size_t i = 0; i < obj->params.size(); i++) {
-                            if (i > 0) sig += ", ";
-                            sig += obj->params[i].name;
+                    }
+                    hoverText += "(";
+                    for (size_t i = 0; i < symbol->paramNames.size(); i++) {
+                        if (i > 0) hoverText += ", ";
+                        hoverText += symbol->paramNames[i];
+                    }
+                    hoverText += ")**";
+                    if (!symbol->methodNames.empty()) {
+                        hoverText += "\n\nMethods: ";
+                        for (size_t i = 0; i < symbol->methodNames.size(); i++) {
+                            if (i > 0) hoverText += ", ";
+                            hoverText += "`" + symbol->methodNames[i] + "`";
                         }
-                        sig += ")**";
-                        nlohmann::json result;
-                        result["contents"]["kind"] = "markdown";
-                        result["contents"]["value"] = sig;
-                        return result;
                     }
-                } else if (auto* let = dynamic_cast<LetStmt*>(s.get())) {
-                    if (let->name == word) {
-                        std::string info = let->isConst ? "**const " : "**let ";
-                        info += let->name;
-                        if (!let->typeAnnotation.empty()) info += ": " + let->typeAnnotation;
-                        info += "**";
-                        nlohmann::json result;
-                        result["contents"]["kind"] = "markdown";
-                        result["contents"]["value"] = info;
-                        return result;
+                    break;
+                }
+                case SymbolKind::Method: {
+                    hoverText = "**method " + symbol->name + "(";
+                    for (size_t i = 0; i < symbol->paramNames.size(); i++) {
+                        if (i > 0) hoverText += ", ";
+                        hoverText += symbol->paramNames[i];
                     }
+                    hoverText += ")**";
+                    break;
+                }
+                case SymbolKind::Variable:
+                case SymbolKind::Constant: {
+                    hoverText = symbol->kind == SymbolKind::Constant
+                        ? "**const " + symbol->name + "**"
+                        : "**let " + symbol->name + "**";
+                    if (!symbol->typeHint.empty()) {
+                        hoverText += ": " + symbol->typeHint;
+                    }
+                    break;
+                }
+                case SymbolKind::Parameter: {
+                    hoverText = "**param " + symbol->name + "**";
+                    break;
+                }
+                case SymbolKind::Import: {
+                    hoverText = "**import \"" + symbol->importPath + "\"**";
+                    break;
+                }
+                default: {
+                    hoverText = "**" + symbol->name + "**";
+                    break;
                 }
             }
+
+            // Add reference count if > 1.
+            auto refs = doc->cachedAnalyzer->findReferencesTo(
+                symbol->declToken.line, symbol->declToken.column);
+            int refCount = static_cast<int>(refs.size()) - 1;  // minus the decl itself
+            if (refCount > 0) {
+                hoverText += "\n\nReferenced " + std::to_string(refCount) +
+                             (refCount == 1 ? " time" : " times");
+            }
+
+            nlohmann::json result;
+            result["contents"]["kind"] = "markdown";
+            result["contents"]["value"] = hoverText;
+            return result;
         }
     }
 
@@ -559,21 +672,85 @@ nlohmann::json LspServer::handleDocumentSymbol(const nlohmann::json& params) {
     auto* doc = getDocument(uri);
     if (!doc) return nlohmann::json::array();
 
-    // Parse the document.
+    parseAndAnalyze(uri);
+
+    // Use semantic analyzer if available; fall back to AST walk.
+    if (doc->cacheValid && doc->cachedAnalyzer) {
+        auto& analyzer = *doc->cachedAnalyzer;
+        nlohmann::json symbols = nlohmann::json::array();
+
+        // Collect all symbols, organized by scope.
+        // Symbols at scope level 0 are top-level; higher levels are nested.
+        // We build a flat list with children populated.
+        const auto& allSyms = analyzer.getVisibleSymbols(1, 1);
+
+        // Filter to symbols that have position info and are "declaration-worthy".
+        for (auto* sym : allSyms) {
+            if (sym->declToken.line == 0) continue;  // no position info (catch vars, etc.)
+            if (sym->kind == SymbolKind::Parameter) continue;  // shown in function signature
+            if (sym->kind == SymbolKind::ForVar) continue;     // too minor
+            if (sym->kind == SymbolKind::CatchVar) continue;   // too minor
+
+            nlohmann::json symJson;
+            symJson["name"] = sym->name;
+
+            // Map to LSP SymbolKind.
+            switch (sym->kind) {
+                case SymbolKind::Variable:  symJson["kind"] = 13; break; // Variable
+                case SymbolKind::Constant:  symJson["kind"] = 14; break; // Constant
+                case SymbolKind::Function:  symJson["kind"] = 12; break; // Function
+                case SymbolKind::Object:    symJson["kind"] = 5;  break; // Class
+                case SymbolKind::Method:    symJson["kind"] = 6;  break; // Method
+                case SymbolKind::Import:    symJson["kind"] = 17; break; // Module
+                default:                   symJson["kind"] = 13; break; // Variable
+            }
+
+            symJson["range"] = tokenToLspRange(sym->declToken);
+            symJson["selectionRange"] = tokenToLspRange(sym->declToken);
+
+            // Build detail string.
+            std::string detail =
+                std::string(symbolKindToString(sym->kind)) + " " + sym->name;
+            if (!sym->typeHint.empty()) detail += ": " + sym->typeHint;
+            symJson["detail"] = detail;
+
+            // Add method children for objects.
+            if (!sym->methodNames.empty()) {
+                nlohmann::json children = nlohmann::json::array();
+                for (auto& methodName : sym->methodNames) {
+                    nlohmann::json child;
+                    child["name"] = methodName;
+                    child["kind"] = 6;  // Method
+                    child["detail"] = "method " + methodName;
+                    // We don't have position info for methods in SymbolInfo
+                    // without extra tracking — skip range for now.
+                    child["range"] = symJson["range"];
+                    child["selectionRange"] = symJson["selectionRange"];
+                    children.push_back(std::move(child));
+                }
+                if (!children.empty()) {
+                    symJson["children"] = std::move(children);
+                }
+            }
+
+            symbols.push_back(std::move(symJson));
+        }
+        return symbols;
+    }
+
+    // Fallback: parse and collect via AST walk.
     DiagnosticCollector collector;
     Lexer lexer(doc->text, collector);
     auto tokens = lexer.scanTokens();
-    if (lexer.hasError()) {
-        // If lexing fails, still return whatever symbols we can extract
-        // from the partial token stream.
-    }
 
     Parser parser(std::move(tokens), collector);
     parser.setSource(doc->text);
     auto program = parser.parse();
 
     nlohmann::json symbols = nlohmann::json::array();
-    collectSymbolsFromProgram(*program, symbols);
+    if (program) {
+        collectSymbolsFromProgram(*program, symbols);
+    }
     return symbols;
 }
 
@@ -600,12 +777,15 @@ void LspServer::publishDiagnostics(const std::string& uri) {
     auto lexDiags = collector.takeDiagnostics();
 
     // ── Parse ────────────────────────────────────────────────────────────
+    std::unique_ptr<vora::Program> program;
+    bool parseHadError = true;
     if (!lexHadError) {
         // Only parse if lexing succeeded (avoids cascading parse errors
         // from garbage tokens).
         Parser parser(std::move(tokens), collector);
         parser.setSource(doc->text);
-        parser.parse();  // result ignored — errors go to collector
+        program = parser.parse();
+        parseHadError = parser.hasError();
     }
 
     auto parseDiags = collector.takeDiagnostics();
@@ -617,6 +797,47 @@ void LspServer::publishDiagnostics(const std::string& uri) {
     diagnostics.insert(diagnostics.end(),
                        std::make_move_iterator(parseDiags.begin()),
                        std::make_move_iterator(parseDiags.end()));
+
+    // ── Semantic diagnostics (warnings/hints) ────────────────────────────
+    // Run only if lex + parse succeeded (we have a valid AST).
+    if (!lexHadError && !parseHadError && program) {
+        // Run semantic analysis and collect warnings.
+        vora::SemanticAnalyzer semAnalyzer;
+        semAnalyzer.analyze(*program);
+
+        // Unused variables → warning.
+        for (auto* sym : semAnalyzer.getUnusedSymbols()) {
+            diagnostics.push_back({
+                sym->declToken.line,
+                sym->declToken.column,
+                static_cast<int>(sym->declToken.lexeme.size()),
+                "Unused variable '" + sym->name + "'",
+                Severity::Warning
+            });
+        }
+
+        // Unreachable code → warning.
+        for (auto& tok : semAnalyzer.getUnreachableTokens()) {
+            diagnostics.push_back({
+                tok.line, tok.column,
+                static_cast<int>(tok.lexeme.size()),
+                "Unreachable code",
+                Severity::Warning
+            });
+        }
+
+        // Shadowed variables → hint.
+        for (auto& [inner, outer] : semAnalyzer.getShadowedSymbols()) {
+            diagnostics.push_back({
+                inner->declToken.line,
+                inner->declToken.column,
+                static_cast<int>(inner->declToken.lexeme.size()),
+                "Variable '" + inner->name + "' shadows declaration at line " +
+                    std::to_string(outer->declToken.line),
+                Severity::Hint
+            });
+        }
+    }
 
     // ── Convert to LSP format ────────────────────────────────────────────
     nlohmann::json lspDiags = nlohmann::json::array();
@@ -650,6 +871,369 @@ void LspServer::publishDiagnostics(const std::string& uri) {
     params["diagnostics"] = std::move(lspDiags);
 
     transport_.sendMessage(buildNotification("textDocument/publishDiagnostics", params));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cache management
+// ═══════════════════════════════════════════════════════════════════════════
+
+void LspServer::parseAndAnalyze(const std::string& uri) {
+    auto* doc = getDocument(uri);
+    if (!doc) return;
+
+    if (doc->cacheValid) return;
+
+    DiagnosticCollector collector;
+    Lexer lexer(doc->text, collector);
+    auto tokens = lexer.scanTokens();
+
+    if (lexer.hasError()) {
+        // Can't analyze — parse would produce garbage.
+        doc->cacheValid = false;
+        return;
+    }
+
+    Parser parser(std::move(tokens), collector);
+    parser.setSource(doc->text);
+    auto program = parser.parse();
+
+    if (!program) {
+        doc->cacheValid = false;
+        return;
+    }
+
+    // Run semantic analysis.
+    auto analyzer = std::make_unique<vora::SemanticAnalyzer>();
+    analyzer->analyze(*program);
+
+    doc->cachedProgram = std::move(program);
+    doc->cachedAnalyzer = std::move(analyzer);
+    doc->cacheValid = true;
+}
+
+void LspServer::invalidateCache(const std::string& uri) {
+    auto* doc = getDocument(uri);
+    if (doc) {
+        doc->cacheValid = false;
+        doc->cachedProgram.reset();
+        doc->cachedAnalyzer.reset();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-file resolution
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::string LspServer::resolveImportPath(const std::string& currentUri,
+                                          const std::string& importPath) {
+    // Strip file:// prefix.
+    std::string currentPath = currentUri;
+    if (currentPath.rfind("file:///", 0) == 0) {
+        currentPath = currentPath.substr(8);  // "file:///" on Windows = 8 chars
+    } else if (currentPath.rfind("file://", 0) == 0) {
+        currentPath = currentPath.substr(7);
+    }
+
+    // Resolve relative paths.
+    std::string dir;
+    auto slashPos = currentPath.find_last_of("/\\");
+    if (slashPos != std::string::npos) {
+        dir = currentPath.substr(0, slashPos);
+    }
+
+    std::string resolved;
+
+    if (importPath.rfind("./", 0) == 0 || importPath.rfind("../", 0) == 0) {
+        // Relative path — resolve against the current file's directory.
+        resolved = dir + "/" + importPath;
+    } else {
+        // Bare path — search workspace root first, then std/.
+        if (!workspaceRoot_.empty()) {
+            resolved = workspaceRoot_ + "/" + importPath;
+        } else {
+            resolved = dir + "/" + importPath;
+        }
+    }
+
+    // Normalize: replace backslashes with forward slashes.
+    for (auto& c : resolved) {
+        if (c == '\\') c = '/';
+    }
+
+    // Append .va if no extension.
+    if (resolved.size() < 3 || resolved.rfind(".va") != resolved.size() - 3) {
+        resolved += ".va";
+    }
+
+    // Remove duplicate slashes (simple approach).
+    std::string normalized;
+    for (size_t i = 0; i < resolved.size(); i++) {
+        if (resolved[i] == '/' && i + 1 < resolved.size() && resolved[i + 1] == '/') {
+            continue;
+        }
+        normalized += resolved[i];
+    }
+
+    return normalized;
+}
+
+vora::SemanticAnalyzer* LspServer::analyzeImportedFile(const std::string& filePath) {
+    // Check cache.
+    auto cacheIt = importedAnalyzers_.find(filePath);
+    if (cacheIt != importedAnalyzers_.end()) {
+        return cacheIt->second.get();
+    }
+
+    // Read file from disk.
+    std::ifstream file(filePath);
+    if (!file.is_open()) {
+        // Try std/ directory adjacent to the workspace.
+        std::string altPath = workspaceRoot_ + "/std/" + filePath;
+        file.open(altPath);
+        if (!file.is_open()) return nullptr;
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    std::string source = buffer.str();
+
+    // Lex + parse.
+    DiagnosticCollector collector;
+    Lexer lexer(source, collector);
+    auto tokens = lexer.scanTokens();
+    if (lexer.hasError()) return nullptr;
+
+    Parser parser(std::move(tokens), collector);
+    parser.setSource(source);
+    auto program = parser.parse();
+    if (!program) return nullptr;
+
+    // Analyze.
+    auto analyzer = std::make_unique<vora::SemanticAnalyzer>();
+    analyzer->analyze(*program);
+
+    auto* result = analyzer.get();
+    importedPrograms_[filePath] = std::move(program);
+    importedAnalyzers_[filePath] = std::move(analyzer);
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Semantic diagnostics
+// ═══════════════════════════════════════════════════════════════════════════
+
+void LspServer::publishSemanticDiagnostics(const std::string& uri) {
+    auto* doc = getDocument(uri);
+    if (!doc) return;
+
+    parseAndAnalyze(uri);
+    if (!doc->cacheValid || !doc->cachedAnalyzer) return;
+
+    auto& analyzer = *doc->cachedAnalyzer;
+    nlohmann::json lspDiags = nlohmann::json::array();
+    (void)lspDiags;  // collected below — we append to the existing diagnostics
+
+    // Helper: convert a 1-based token to an LSP diagnostic.
+    auto makeDiag = [&](const Token& tok, const std::string& msg, int severity) {
+        int lspLine = (tok.line > 0) ? tok.line - 1 : 0;
+        int lspCol  = (tok.column > 0) ? tok.column - 1 : 0;
+        int len = static_cast<int>(tok.lexeme.size());
+        if (len == 0) len = 1;
+
+        nlohmann::json diag;
+        diag["range"]["start"]["line"] = lspLine;
+        diag["range"]["start"]["character"] = lspCol;
+        diag["range"]["end"]["line"] = lspLine;
+        diag["range"]["end"]["character"] = lspCol + len;
+        diag["severity"] = severity;
+        diag["source"] = "vora (semantic)";
+        diag["message"] = msg;
+        return diag;
+    };
+
+    nlohmann::json semanticDiags = nlohmann::json::array();
+
+    // ── Unused variables ───────────────────────────────────────────────
+    for (auto* sym : analyzer.getUnusedSymbols()) {
+        std::string msg = "Unused variable '" + sym->name + "'";
+        semanticDiags.push_back(makeDiag(sym->declToken, msg, 2));  // Warning
+    }
+
+    // ── Unreachable code ──────────────────────────────────────────────
+    for (auto& tok : analyzer.getUnreachableTokens()) {
+        semanticDiags.push_back(makeDiag(tok, "Unreachable code", 2));  // Warning
+    }
+
+    // ── Shadowed variables ────────────────────────────────────────────
+    for (auto& [inner, outer] : analyzer.getShadowedSymbols()) {
+        std::string msg = "Variable '" + inner->name +
+                          "' shadows declaration at line " +
+                          std::to_string(outer->declToken.line);
+        semanticDiags.push_back(makeDiag(inner->declToken, msg, 3));  // Hint
+    }
+
+    // Publish as separate notification (or merge with existing —
+    // for simplicity, we publish separately with a different source).
+    if (!semanticDiags.empty()) {
+        nlohmann::json params;
+        params["uri"] = uri;
+        params["diagnostics"] = std::move(semanticDiags);
+        transport_.sendMessage(buildNotification("textDocument/publishDiagnostics", params));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// References
+// ═══════════════════════════════════════════════════════════════════════════
+
+nlohmann::json LspServer::handleReferences(const nlohmann::json& params) {
+    auto td = params["textDocument"];
+    std::string uri = td["uri"].get<std::string>();
+    auto* doc = getDocument(uri);
+    if (!doc) return nlohmann::json::array();
+
+    parseAndAnalyze(uri);
+    if (!doc->cacheValid || !doc->cachedAnalyzer) return nlohmann::json::array();
+
+    int line = params["position"]["line"].get<int>();
+    int character = params["position"]["character"].get<int>();
+
+    // Convert LSP 0-based to Vora 1-based.
+    int voraLine = line + 1;
+    int voraCol = character + 1;
+
+    auto refs = doc->cachedAnalyzer->findReferencesTo(voraLine, voraCol);
+
+    nlohmann::json locations = nlohmann::json::array();
+    for (auto& ref : refs) {
+        nlohmann::json loc;
+        loc["uri"] = uri;
+        loc["range"] = tokenToLspRange(ref.token);
+        locations.push_back(std::move(loc));
+    }
+
+    // Also search in importing files (cross-file references).
+    // For exported symbols, check all open documents that import this module.
+    // (Simplified: only same-file references for now; cross-file is a future
+    // enhancement requiring import graph traversal.)
+
+    return locations;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Signature help
+// ═══════════════════════════════════════════════════════════════════════════
+
+nlohmann::json LspServer::handleSignatureHelp(const nlohmann::json& params) {
+    auto td = params["textDocument"];
+    std::string uri = td["uri"].get<std::string>();
+    auto* doc = getDocument(uri);
+    if (!doc) return nullptr;
+
+    parseAndAnalyze(uri);
+    if (!doc->cacheValid || !doc->cachedAnalyzer) return nullptr;
+
+    int line = params["position"]["line"].get<int>();
+    int character = params["position"]["character"].get<int>();
+
+    int voraLine = line + 1;
+    int voraCol = character + 1;
+
+    // Strategy: find the innermost CallExpr that contains the cursor position.
+    // Since we don't have AST node ranges, we use a text-based approach:
+    // walk backward from the cursor to find the opening '(' of a call.
+    int offset = lspPositionToOffset(doc->text, line, character);
+
+    // Walk backward to find the function name.
+    int parenNesting = 0;
+    int callStart = -1;
+    for (int i = offset; i >= 0; i--) {
+        char c = doc->text[i];
+        if (c == ')') parenNesting++;
+        else if (c == '(') {
+            if (parenNesting == 0) {
+                callStart = i;
+                break;
+            }
+            parenNesting--;
+        }
+    }
+
+    if (callStart < 0) return nullptr;
+
+    // Find the callee name before the '('.
+    int calleeEnd = callStart;
+    while (calleeEnd > 0 && doc->text[calleeEnd - 1] == ' ') calleeEnd--;
+    int calleeStart = calleeEnd;
+    while (calleeStart > 0 && (std::isalnum(static_cast<unsigned char>(doc->text[calleeStart - 1]))
+                               || doc->text[calleeStart - 1] == '_'
+                               || doc->text[calleeStart - 1] == '$')) {
+        calleeStart--;
+    }
+    std::string calleeName = doc->text.substr(calleeStart, calleeEnd - calleeStart);
+
+    // Count commas between callStart and offset to determine active parameter.
+    int activeParam = 0;
+    int parenDepth = 0;
+    for (int i = callStart + 1; i < offset && i < static_cast<int>(doc->text.size()); i++) {
+        char c = doc->text[i];
+        if (c == '(' || c == '[' || c == '{') parenDepth++;
+        else if (c == ')' || c == ']' || c == '}') parenDepth--;
+        else if (c == ',' && parenDepth == 0) activeParam++;
+    }
+
+    // Find the callee declaration.
+    const auto* symbol = doc->cachedAnalyzer->findSymbolAt(voraLine, voraCol);
+    if (!symbol && !calleeName.empty()) {
+        // Try resolving by name.
+        symbol = doc->cachedAnalyzer->findDeclarationAt(
+            static_cast<int>(std::count(doc->text.begin(), doc->text.begin() + calleeStart, '\n')) + 1,
+            calleeStart - static_cast<int>(doc->text.rfind('\n', calleeStart - 1)));
+        if (!symbol) {
+            // Try the analyzer's table directly.
+            const auto& allSyms = doc->cachedAnalyzer->getVisibleSymbols(voraLine, voraCol);
+            for (auto* s : allSyms) {
+                if (s->name == calleeName &&
+                    (s->kind == SymbolKind::Function || s->kind == SymbolKind::Method ||
+                     s->kind == SymbolKind::Object)) {
+                    symbol = s;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!symbol) return nullptr;
+
+    // Build signature information.
+    nlohmann::json sigInfo;
+    std::string label = symbol->name + "(";
+    nlohmann::json params_array = nlohmann::json::array();
+
+    for (size_t pi = 0; pi < symbol->paramNames.size(); pi++) {
+        if (pi > 0) label += ", ";
+        label += symbol->paramNames[pi];
+
+        nlohmann::json paramInfo;
+        paramInfo["label"] = symbol->paramNames[pi];
+        params_array.push_back(std::move(paramInfo));
+    }
+    if (symbol->hasRestParam && !symbol->paramNames.empty()) {
+        label += "...";
+    }
+    label += ")";
+
+    sigInfo["label"] = label;
+    if (!params_array.empty()) {
+        sigInfo["parameters"] = std::move(params_array);
+    }
+
+    nlohmann::json result;
+    result["signatures"] = nlohmann::json::array({std::move(sigInfo)});
+    result["activeSignature"] = 0;
+    result["activeParameter"] = activeParam;
+
+    return result;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

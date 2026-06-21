@@ -1,4 +1,5 @@
 {
+    "_comment": "Syntax coloring philosophy: keywords use unified 'keyword.control.vora' scope (not sub-classified) to avoid bold/intense rendering many themes apply to .conditional/.loop subcategories. 'storage.type.vora' is used for declaration keywords (let/const/func/Obj). 'keyword.other.import.vora' for module keywords to reduce contrast. Exception keywords keep 'keyword.control.exception.vora' for visual distinction. Recommended theme settings for optimal readability: editor.tokenColorCustomizations.textMateRules: [{ scope: 'keyword.control.vora', settings: { fontStyle: '' } }, { scope: 'storage.type.vora', settings: { fontStyle: '' } }]",
     "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
     "name": "Vora",
     "scopeName": "source.vora",
@@ -105,16 +106,8 @@
         "keywords": {
             "patterns": [
                 {
-                    "name": "keyword.control.conditional.vora",
-                    "match": "\\b(if|else)\\b"
-                },
-                {
-                    "name": "keyword.control.loop.vora",
-                    "match": "\\b(while|for|in|break|continue)\\b"
-                },
-                {
-                    "name": "keyword.control.flow.vora",
-                    "match": "\\b(return|yield)\\b"
+                    "name": "keyword.control.vora",
+                    "match": "\\b(if|else|while|for|in|break|continue|return|yield)\\b"
                 },
                 {
                     "name": "keyword.control.exception.vora",
@@ -125,7 +118,7 @@
                     "match": "\\b(let|const|func|Obj)\\b"
                 },
                 {
-                    "name": "keyword.control.import.vora",
+                    "name": "keyword.other.import.vora",
                     "match": "\\b(import|export|from|as)\\b"
                 },
                 {
@@ -293,7 +286,7 @@
                     "name": "meta.import.vora",
                     "match": "\\b(import)\\s+(\"[^\"]*\")",
                     "captures": {
-                        "1": { "name": "keyword.control.import.vora" },
+                        "1": { "name": "keyword.other.import.vora" },
                         "2": { "name": "string.quoted.double.vora" }
                     }
                 },
@@ -301,9 +294,9 @@
                     "name": "meta.import-from.vora",
                     "match": "\\b(from)\\s+(\"[^\"]*\")\\s+(import)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)",
                     "captures": {
-                        "1": { "name": "keyword.control.import.vora" },
+                        "1": { "name": "keyword.other.import.vora" },
                         "2": { "name": "string.quoted.double.vora" },
-                        "3": { "name": "keyword.control.import.vora" },
+                        "3": { "name": "keyword.other.import.vora" },
                         "4": { "name": "variable.other.readwrite.vora" }
                     }
                 },
@@ -311,7 +304,7 @@
                     "name": "meta.export.vora",
                     "match": "\\b(export)\\s+(func|let|const|Obj)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)",
                     "captures": {
-                        "1": { "name": "keyword.control.import.vora" },
+                        "1": { "name": "keyword.other.import.vora" },
                         "2": { "name": "storage.type.vora" },
                         "3": { "name": "entity.name.function.vora" }
                     }
@@ -324,9 +317,9 @@
                     "name": "meta.for-in.vora",
                     "match": "\\b(for)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\\s+(in)\\b",
                     "captures": {
-                        "1": { "name": "keyword.control.loop.vora" },
+                        "1": { "name": "keyword.control.vora" },
                         "2": { "name": "variable.other.readwrite.vora" },
-                        "3": { "name": "keyword.control.loop.vora" }
+                        "3": { "name": "keyword.control.vora" }
                     }
                 },
                 {
@@ -334,7 +327,7 @@
                     "begin": "\\b(for)\\s*(\\()",
                     "end": "\\)",
                     "beginCaptures": {
-                        "1": { "name": "keyword.control.loop.vora" },
+                        "1": { "name": "keyword.control.vora" },
                         "2": { "name": "punctuation.definition.group.vora" }
                     },
                     "endCaptures": {

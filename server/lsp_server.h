@@ -31,6 +31,7 @@ namespace vora {
     struct Token;
     class Stmt;
     class Program;
+    class SemanticAnalyzer;
 }
 
 namespace vora::lsp {
@@ -42,6 +43,11 @@ struct DocumentState {
     int version = 0;
     std::string text;
     bool open = false;
+
+    // ── Cached analysis results (invalidated on every text change) ──
+    std::unique_ptr<vora::Program> cachedProgram;
+    std::unique_ptr<vora::SemanticAnalyzer> cachedAnalyzer;
+    bool cacheValid = false;
 };
 
 /// Diagnostic collector — implements ErrorReporter, stores diagnostics
@@ -99,6 +105,11 @@ private:
     // ── Document store ──────────────────────────────────────────────────
     std::unordered_map<std::string, DocumentState> documents_;
 
+    // ── Cross-file resolution cache ─────────────────────────────────────
+    std::unordered_map<std::string, std::unique_ptr<vora::Program>> importedPrograms_;
+    std::unordered_map<std::string, std::unique_ptr<vora::SemanticAnalyzer>> importedAnalyzers_;
+    std::string workspaceRoot_;
+
     // ── Handlers ────────────────────────────────────────────────────────
 
     // Lifecycle
@@ -118,9 +129,12 @@ private:
     nlohmann::json handleHover(const nlohmann::json& params);
     nlohmann::json handleFormatting(const nlohmann::json& params);
     nlohmann::json handleDocumentSymbol(const nlohmann::json& params);
+    nlohmann::json handleReferences(const nlohmann::json& params);
+    nlohmann::json handleSignatureHelp(const nlohmann::json& params);
 
     // ── Diagnostics ─────────────────────────────────────────────────────
     void publishDiagnostics(const std::string& uri);
+    void publishSemanticDiagnostics(const std::string& uri);
 
     // ── Symbol collection ───────────────────────────────────────────────
     void collectSymbols(const Stmt* stmt, nlohmann::json& symbols);
@@ -133,6 +147,15 @@ private:
     // ── Definition ──────────────────────────────────────────────────────
     nlohmann::json findDefinition(const std::string& source,
                                    int searchLine, int searchCol);
+
+    // ── Cross-file resolution ──────────────────────────────────────────
+    std::string resolveImportPath(const std::string& currentUri,
+                                   const std::string& importPath);
+    vora::SemanticAnalyzer* analyzeImportedFile(const std::string& filePath);
+
+    // ── Cache management ───────────────────────────────────────────────
+    void parseAndAnalyze(const std::string& uri);
+    void invalidateCache(const std::string& uri);
 
     // ── Helpers ─────────────────────────────────────────────────────────
     void log(const std::string& message);
