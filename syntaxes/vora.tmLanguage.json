@@ -107,7 +107,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.vora",
-                    "match": "\\b(if|else|while|for|in|break|continue|return|yield)\\b"
+                    "match": "\\b(if|else|while|for|in|break|continue|return|yield|match)\\b"
                 },
                 {
                     "name": "keyword.control.exception.vora",
@@ -147,7 +147,7 @@
             "patterns": [
                 {
                     "name": "support.function.builtin.vora",
-                    "match": "\\b(print|type|int|float|toString|len|clock|assert|input|range|bin|oct|hex|iter|next)\\s*(?=\\()"
+                    "match": "\\b(print|type|int|float|toString|len|clock|assert|input|range|bin|oct|hex|iter|next|Set|Map)\\s*(?=\\()"
                 }
             ]
         },
