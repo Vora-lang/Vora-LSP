@@ -1272,7 +1272,14 @@ int LspServer::lspPositionToOffset(const std::string& text, int line, int charac
             currentLine++;
             currentChar = 0;
         } else {
-            currentChar++;
+            // Skip UTF-8 continuation bytes (10xxxxxx) — they don't
+            // advance the LSP character position. Without this, multi-byte
+            // characters (Unicode, Chinese, emoji, etc.) cause the offset
+            // to drift, producing garbled substrings that fail JSON
+            // serialization with "invalid UTF-8 byte".
+            if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
+                currentChar++;
+            }
         }
     }
     // Cursor at end of text or beyond — return last valid offset.
@@ -1286,7 +1293,8 @@ nlohmann::json LspServer::offsetToLspPosition(const std::string& text, int offse
         if (text[i] == '\n') {
             line++;
             character = 0;
-        } else {
+        } else if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
+            // Count only UTF-8 start bytes (not continuation bytes) as characters.
             character++;
         }
     }
