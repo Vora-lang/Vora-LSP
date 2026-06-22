@@ -107,7 +107,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.vora",
-                    "match": "\\b(if|else|while|for|in|break|continue|return|yield|match)\\b"
+                    "match": "\\b(if|else|while|for|in|do|break|continue|return|yield|match|defer)\\b"
                 },
                 {
                     "name": "keyword.control.exception.vora",
