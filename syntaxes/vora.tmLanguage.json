@@ -178,6 +178,26 @@
                     "match": "=(?!=)"
                 },
                 {
+                    "name": "keyword.operator.arrow.vora",
+                    "match": "=>"
+                },
+                {
+                    "name": "keyword.operator.null-coalescing.vora",
+                    "match": "\\?\\?"
+                },
+                {
+                    "name": "keyword.operator.optional-chaining.vora",
+                    "match": "\\?\\."
+                },
+                {
+                    "name": "keyword.operator.range-inclusive.vora",
+                    "match": "\\.\\.="
+                },
+                {
+                    "name": "keyword.operator.range.vora",
+                    "match": "\\.\\."
+                },
+                {
                     "name": "keyword.operator.ternary.vora",
                     "match": "\\?|:"
                 },

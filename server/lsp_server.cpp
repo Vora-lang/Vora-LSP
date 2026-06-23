@@ -82,10 +82,6 @@ LspServer::LspServer() {
     router_.registerRequest("textDocument/signatureHelp",
         [this](const nlohmann::json& p) { return handleSignatureHelp(p); });
 
-    // Also register the shorthand forms that some clients send.
-    router_.registerRequest("shutdown",
-        [this](const nlohmann::json& p) { return handleShutdown(p); });
-
     log("Vora LSP server " + serverVersion_ + " ready");
 }
 
@@ -171,7 +167,9 @@ nlohmann::json LspServer::handleShutdown(const nlohmann::json& /*params*/) {
 void LspServer::handleExit(const nlohmann::json& /*params*/) {
     log("exit");
     // Per LSP spec: exit notification after shutdown → terminate.
-    // Use _Exit to avoid static destructors that might hang.
+    // std::_Exit() intentionally skips static destructors and atexit handlers
+    // that could hang or crash on unclean shutdown (e.g. dangling I/O threads).
+    // In this context the process is dead anyway — no resources leak.
     std::_Exit(shutdown_ ? 0 : 1);
 }
 
@@ -302,6 +300,24 @@ nlohmann::json LspServer::handleCompletion(const nlohmann::json& params) {
         addMethod("keys", "Dict method: get all keys");
         addMethod("values", "Dict method: get all values");
         addMethod("has", "Dict method: check if key exists");
+
+        // Set methods
+        addMethod("add", "Set method: add element");
+        addMethod("has", "Set method: check if element exists");
+        addMethod("delete", "Set method: remove element");
+        addMethod("clear", "Set method: remove all elements");
+        addMethod("values", "Set method: get all values as array");
+        addMethod("size", "Set property: number of elements");
+
+        // Map methods
+        addMethod("set", "Map method: set key-value pair");
+        addMethod("get", "Map method: get value by key");
+        addMethod("has", "Map method: check if key exists");
+        addMethod("delete", "Map method: remove key-value pair");
+        addMethod("clear", "Map method: remove all entries");
+        addMethod("keys", "Map method: get all keys");
+        addMethod("values", "Map method: get all values");
+        addMethod("size", "Map property: number of entries");
     }
 
     // ── Scope-aware: visible symbols from semantic analysis ────────────
@@ -620,9 +636,7 @@ nlohmann::json LspServer::handleFormatting(const nlohmann::json& params) {
 
     auto* doc = getDocument(uri);
     if (!doc) {
-        nlohmann::json result;
-        result["error"] = "Document not found";
-        return result;
+        return nlohmann::json::array();  // LSP spec: return TextEdit[], empty = no changes
     }
 
     // Lex → Parse → Format
@@ -635,10 +649,8 @@ nlohmann::json LspServer::handleFormatting(const nlohmann::json& params) {
     auto program = parser.parse();
 
     if (!program || program->statements.empty()) {
-        // Empty or completely broken — return original text unchanged.
-        nlohmann::json result;
-        result["error"] = "Could not parse document";
-        return result;
+        // Empty or broken — return empty TextEdit[] (no formatting changes).
+        return nlohmann::json::array();
     }
 
     SourceFormatter formatter;
@@ -800,13 +812,19 @@ void LspServer::publishDiagnostics(const std::string& uri) {
 
     // ── Semantic diagnostics (warnings/hints) ────────────────────────────
     // Run only if lex + parse succeeded (we have a valid AST).
+    // Cache the analysis results so subsequent language feature requests
+    // (completion, hover, goto-def) can reuse them via parseAndAnalyze().
     if (!lexHadError && !parseHadError && program) {
-        // Run semantic analysis and collect warnings.
-        vora::SemanticAnalyzer semAnalyzer;
-        semAnalyzer.analyze(*program);
+        auto semAnalyzer = std::make_unique<vora::SemanticAnalyzer>();
+        semAnalyzer->analyze(*program);
+
+        // Cache for later reuse (parseAndAnalyze checks cacheValid first).
+        doc->cachedProgram = std::move(program);
+        doc->cachedAnalyzer = std::move(semAnalyzer);
+        doc->cacheValid = true;
 
         // Unused variables → warning.
-        for (auto* sym : semAnalyzer.getUnusedSymbols()) {
+        for (auto* sym : doc->cachedAnalyzer->getUnusedSymbols()) {
             diagnostics.push_back({
                 sym->declToken.line,
                 sym->declToken.column,
@@ -817,7 +835,7 @@ void LspServer::publishDiagnostics(const std::string& uri) {
         }
 
         // Unreachable code → warning.
-        for (auto& tok : semAnalyzer.getUnreachableTokens()) {
+        for (auto& tok : doc->cachedAnalyzer->getUnreachableTokens()) {
             diagnostics.push_back({
                 tok.line, tok.column,
                 static_cast<int>(tok.lexeme.size()),
@@ -827,7 +845,7 @@ void LspServer::publishDiagnostics(const std::string& uri) {
         }
 
         // Shadowed variables → hint.
-        for (auto& [inner, outer] : semAnalyzer.getShadowedSymbols()) {
+        for (auto& [inner, outer] : doc->cachedAnalyzer->getShadowedSymbols()) {
             diagnostics.push_back({
                 inner->declToken.line,
                 inner->declToken.column,
@@ -988,7 +1006,11 @@ vora::SemanticAnalyzer* LspServer::analyzeImportedFile(const std::string& filePa
     std::ifstream file(filePath);
     if (!file.is_open()) {
         // Try std/ directory adjacent to the workspace.
-        std::string altPath = workspaceRoot_ + "/std/" + filePath;
+        // Extract basename from filePath (which may be an absolute path).
+        auto lastSlash = filePath.find_last_of("/\\");
+        std::string fileName = (lastSlash != std::string::npos)
+            ? filePath.substr(lastSlash + 1) : filePath;
+        std::string altPath = workspaceRoot_ + "/std/" + fileName;
         file.open(altPath);
         if (!file.is_open()) return nullptr;
     }
@@ -1262,6 +1284,10 @@ nlohmann::json LspServer::tokenToLspRange(const Token& token) {
 }
 
 int LspServer::lspPositionToOffset(const std::string& text, int line, int character) {
+    // Defensive: negative positions or empty text → clamp to start.
+    if (text.empty() || line < 0 || character < 0) {
+        return 0;
+    }
     int currentLine = 0;
     int currentChar = 0;
     for (size_t i = 0; i < text.size(); i++) {

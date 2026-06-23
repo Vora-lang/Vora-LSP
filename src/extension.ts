@@ -26,12 +26,22 @@ let client: LanguageClient | undefined;
 export function activate(context: vscode.ExtensionContext): void {
     // ── Server configuration ────────────────────────────────────────────
     const config = vscode.workspace.getConfiguration('vora');
-    const serverPath: string = config.get('vora.lsp.serverPath', 'vora-lsp');
+    const serverPath: string = config.get('lsp.serverPath', 'vora-lsp');
 
     // Resolve relative paths against the extension directory.
     const resolvedPath = path.isAbsolute(serverPath)
         ? serverPath
         : path.join(context.extensionPath, serverPath);
+
+    // ── Verify server binary exists ──────────────────────────────────────
+    const fs = await import('fs');
+    if (!fs.existsSync(resolvedPath)) {
+        void vscode.window.showErrorMessage(
+            `Vora: Language server binary not found at "${resolvedPath}". ` +
+            'Build the LSP server first, or set "vora.lsp.serverPath" to the correct path.',
+        );
+        return;
+    }
 
     const serverOptions: ServerOptions = {
         command: resolvedPath,

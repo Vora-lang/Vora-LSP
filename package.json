@@ -5,7 +5,7 @@
     "version": "0.1.0",
     "publisher": "vora-lang",
     "license": "MIT",
-    "icon": "vora_logo.png",
+    "icon": "vora_logo.svg",
     "repository": {
         "type": "git",
         "url": "https://github.com/Vora-lang/Vora-LSP"

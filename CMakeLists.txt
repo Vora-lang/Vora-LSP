@@ -9,7 +9,7 @@ project(Vora-LSP LANGUAGES CXX)
 
 set(VORA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Vora"
     CACHE PATH "Path to the Vora repository root")
-set(VORA_BUILD "${VORA_ROOT}/build/windows-x64-debug"
+set(VORA_BUILD "${VORA_ROOT}/build/windows-x64"
     CACHE PATH "Path to the Vora build directory (containing vora_lib)")
 
 # ──────────────────────────────────────────────────
@@ -19,7 +19,9 @@ set(VORA_BUILD "${VORA_ROOT}/build/windows-x64-debug"
 # Ninja/Make put it directly in the build dir.
 if(MSVC)
     find_library(VORA_LIB vora_lib
-        PATHS "${VORA_BUILD}/vora_lib.dir/Debug"
+        PATHS
+            "${VORA_BUILD}/vora_lib.dir/$<CONFIG>"
+            "${VORA_BUILD}/$<CONFIG>"
         NO_DEFAULT_PATH
     )
 else()
@@ -62,6 +64,6 @@ target_compile_features(vora-lsp PRIVATE cxx_std_17)
 add_custom_command(TARGET vora-lsp POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:vora-lsp>"
-        "${CMAKE_CURRENT_SOURCE_DIR}/vora-lsp.exe"
-    COMMENT "Copying vora-lsp.exe to repo root for VS Code extension"
+        "${CMAKE_CURRENT_SOURCE_DIR}/$<TARGET_FILE_NAME:vora-lsp>"
+    COMMENT "Copying vora-lsp binary to repo root for VS Code extension"
 )
