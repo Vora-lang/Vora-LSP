@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 project(Vora-LSP LANGUAGES CXX)
 
+# Tell MSVC to treat source files as UTF-8 (eliminates C4819 code page warnings
+# on systems where the default locale uses a narrow code page like 936/GBK).
+# Without this, string literals containing Unicode characters like → (U+2192)
+# get misinterpreted and appear garbled in hover/completion text in VS Code.
+# /utf-8 sets both source and execution character sets to UTF-8.
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 # ──────────────────────────────────────────────────
 # Paths to the Vora language core
 # ──────────────────────────────────────────────────
