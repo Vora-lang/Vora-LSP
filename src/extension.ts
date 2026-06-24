@@ -33,9 +33,14 @@ export function activate(context: vscode.ExtensionContext): void {
         ? serverPath
         : path.join(context.extensionPath, serverPath);
 
-    // ── Verify server binary exists ──────────────────────────────────────
-    const fs = await import('fs');
-    if (!fs.existsSync(resolvedPath)) {
+    // ── Resolve platform-specific binary name ───────────────────────────
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs') as typeof import('fs');
+    let binaryPath = resolvedPath;
+    if (!fs.existsSync(binaryPath) && process.platform === 'win32' && !binaryPath.endsWith('.exe')) {
+        binaryPath = resolvedPath + '.exe';
+    }
+    if (!fs.existsSync(binaryPath)) {
         void vscode.window.showErrorMessage(
             `Vora: Language server binary not found at "${resolvedPath}". ` +
             'Build the LSP server first, or set "vora.lsp.serverPath" to the correct path.',
@@ -44,7 +49,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     const serverOptions: ServerOptions = {
-        command: resolvedPath,
+        command: binaryPath,
         args: [],
         transport: TransportKind.stdio,
     };
