@@ -20,8 +20,8 @@ set(VORA_BUILD "${VORA_ROOT}/build/windows-x64"
 if(MSVC)
     find_library(VORA_LIB vora_lib
         PATHS
-            "${VORA_BUILD}/vora_lib.dir/$<CONFIG>"
-            "${VORA_BUILD}/$<CONFIG>"
+            "${VORA_BUILD}/Debug"
+            "${VORA_BUILD}/Release"
         NO_DEFAULT_PATH
     )
 else()

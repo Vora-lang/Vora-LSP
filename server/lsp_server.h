@@ -36,6 +36,14 @@ namespace vora {
 
 namespace vora::lsp {
 
+/// Context classification for cursor position — drives completion filtering.
+enum class CompletionContext {
+    GENERAL,          // Default: all completion items apply.
+    PROPERTY_ACCESS,  // After '.': only type-filtered methods.
+    CALL_ARGUMENT,    // Inside '(' ... ')': suppress declaration keywords.
+    STRING_LITERAL,   // Inside "...": no completions (or import-path only).
+};
+
 /// Per-document state tracked by the LSP server.
 struct DocumentState {
     std::string uri;
@@ -143,6 +151,14 @@ private:
     // ── Completion data ─────────────────────────────────────────────────
     nlohmann::json getKeywordCompletions() const;
     nlohmann::json getBuiltinCompletions() const;
+    nlohmann::json getExpressionKeywords() const;
+    nlohmann::json getTypeMethods(const std::string& typeName) const;
+    nlohmann::json getAllMethods() const;
+
+    // ── Completion context ───────────────────────────────────────────────
+    CompletionContext detectCompletionContext(const std::string& text, int offset) const;
+    std::string detectPrecedingType(const std::string& text, int dotOffset,
+                                     vora::SemanticAnalyzer* analyzer) const;
 
     // ── Definition ──────────────────────────────────────────────────────
     nlohmann::json findDefinition(const std::string& source,

@@ -253,139 +253,152 @@ nlohmann::json LspServer::handleCompletion(const nlohmann::json& params) {
     result["isIncomplete"] = false;
     auto& items = result["items"] = nlohmann::json::array();
 
-    // ── Always provide keyword completions ──────────────────────────────
-    auto keywords = getKeywordCompletions();
-    for (auto& kw : keywords) items.push_back(std::move(kw));
-
-    // ── Always provide builtin function completions ─────────────────────
-    auto builtins = getBuiltinCompletions();
-    for (auto& b : builtins) items.push_back(std::move(b));
-
-    // ── Context-sensitive: after '.' suggest known methods ──────────────
     int offset = lspPositionToOffset(doc->text, line, character);
-    if (offset >= 2 && doc->text[offset - 1] == '.') {
-        // Detect if there's a preceding identifier
-        // For now, suggest common methods regardless of type
-        auto addMethod = [&](const char* name, const char* desc) {
-            nlohmann::json item;
-            item["label"] = name;
-            item["kind"] = 2;  // Method
-            item["detail"] = desc;
-            item["insertText"] = name;
-            items.push_back(std::move(item));
-        };
+    auto context = detectCompletionContext(doc->text, offset);
 
-        // Array methods
-        addMethod("add", "Array method: add element");
-        addMethod("pop", "Array method: remove last element");
-        addMethod("insert", "Array method: insert at index");
-        addMethod("remove", "Array method: remove at index");
-        addMethod("indexOf", "Array method: find index of value");
-        addMethod("clear", "Array method: remove all elements");
-        addMethod("length", "Array/Dict/String length property");
-
-        // String methods
-        addMethod("substring", "String method: extract substring");
-        addMethod("include", "String method: check if contains");
-        addMethod("startsWith", "String method: check prefix");
-        addMethod("endsWith", "String method: check suffix");
-        addMethod("upper", "String method: to uppercase");
-        addMethod("lower", "String method: to lowercase");
-        addMethod("trim", "String method: trim whitespace");
-        addMethod("replace", "String method: replace first occurrence");
-        addMethod("replaceAll", "String method: replace all occurrences");
-        addMethod("split", "String method: split by delimiter");
-
-        // Dict methods
-        addMethod("keys", "Dict method: get all keys");
-        addMethod("values", "Dict method: get all values");
-        addMethod("has", "Dict method: check if key exists");
-
-        // Set methods
-        addMethod("add", "Set method: add element");
-        addMethod("has", "Set method: check if element exists");
-        addMethod("delete", "Set method: remove element");
-        addMethod("clear", "Set method: remove all elements");
-        addMethod("values", "Set method: get all values as array");
-        addMethod("size", "Set property: number of elements");
-
-        // Map methods
-        addMethod("set", "Map method: set key-value pair");
-        addMethod("get", "Map method: get value by key");
-        addMethod("has", "Map method: check if key exists");
-        addMethod("delete", "Map method: remove key-value pair");
-        addMethod("clear", "Map method: remove all entries");
-        addMethod("keys", "Map method: get all keys");
-        addMethod("values", "Map method: get all values");
-        addMethod("size", "Map property: number of entries");
-    }
-
-    // ── Scope-aware: visible symbols from semantic analysis ────────────
+    // ── Semantic analysis (lazy, cached) ──────────────────────────────────
     parseAndAnalyze(uri);
-    if (doc->cacheValid && doc->cachedAnalyzer) {
-        int voraLine = line + 1;
-        int voraCol = character + 1;
+    vora::SemanticAnalyzer* analyzer = (doc->cacheValid) ? doc->cachedAnalyzer.get() : nullptr;
 
-        auto visibleSymbols = doc->cachedAnalyzer->getVisibleSymbols(voraLine, voraCol);
+    // ═══════════════════════════════════════════════════════════════════════
+    // Context dispatch
+    // ═══════════════════════════════════════════════════════════════════════
 
-        for (auto* sym : visibleSymbols) {
-            nlohmann::json item;
-            item["label"] = sym->name;
+    if (context == CompletionContext::PROPERTY_ACCESS) {
+        // ── After '.' → only methods, filtered by type if possible ────────
+        int dotOffset = offset - 1;  // position of the '.' character
+        std::string typeName = detectPrecedingType(doc->text, dotOffset, analyzer);
 
-            // Map SymbolKind to LSP CompletionItemKind.
-            switch (sym->kind) {
-                case SymbolKind::Variable:  item["kind"] = 6;  break;  // Variable
-                case SymbolKind::Constant:  item["kind"] = 14; break;  // Constant
-                case SymbolKind::Function:  item["kind"] = 3;  break;  // Function
-                case SymbolKind::Parameter: item["kind"] = 6;  break;  // Variable
-                case SymbolKind::Object:    item["kind"] = 7;  break;  // Class
-                case SymbolKind::Method:    item["kind"] = 2;  break;  // Method
-                case SymbolKind::Import:    item["kind"] = 9;  break;  // Module
-                case SymbolKind::ForVar:    item["kind"] = 6;  break;  // Variable
-                case SymbolKind::CatchVar:  item["kind"] = 6;  break;  // Variable
+        if (!typeName.empty()) {
+            auto typedMethods = getTypeMethods(typeName);
+            for (auto& m : typedMethods) items.push_back(std::move(m));
+        } else {
+            // Fallback: all methods (type unknown).
+            auto allMethods = getAllMethods();
+            for (auto& m : allMethods) items.push_back(std::move(m));
+        }
+
+    } else if (context == CompletionContext::STRING_LITERAL) {
+        // ── Inside "..." → no completions (defer to import-path handling later) ──
+        // For now, return empty; import-path completion can be added later.
+
+    } else if (context == CompletionContext::CALL_ARGUMENT) {
+        // ── Inside (...) → expression-level keywords + builtins + symbols ──
+        auto exprKeys = getExpressionKeywords();
+        for (auto& kw : exprKeys) items.push_back(std::move(kw));
+
+        auto builtins = getBuiltinCompletions();
+        for (auto& b : builtins) items.push_back(std::move(b));
+
+        // Visible symbols.
+        if (analyzer) {
+            int voraLine = line + 1;
+            int voraCol = character + 1;
+            auto visibleSymbols = analyzer->getVisibleSymbols(voraLine, voraCol);
+
+            for (auto* sym : visibleSymbols) {
+                nlohmann::json item;
+                item["label"] = sym->name;
+
+                switch (sym->kind) {
+                    case SymbolKind::Variable:  item["kind"] = 6;  break;
+                    case SymbolKind::Constant:  item["kind"] = 14; break;
+                    case SymbolKind::Function:  item["kind"] = 3;  break;
+                    case SymbolKind::Parameter: item["kind"] = 6;  break;
+                    case SymbolKind::Object:    item["kind"] = 7;  break;
+                    case SymbolKind::Method:    item["kind"] = 2;  break;
+                    case SymbolKind::Import:    item["kind"] = 9;  break;
+                    case SymbolKind::ForVar:    item["kind"] = 6;  break;
+                    case SymbolKind::CatchVar:  item["kind"] = 6;  break;
+                }
+
+                std::string detail;
+                switch (sym->kind) {
+                    case SymbolKind::Variable:  detail = "let " + sym->name; break;
+                    case SymbolKind::Constant:  detail = "const " + sym->name; break;
+                    case SymbolKind::Function:
+                        detail = "func " + sym->name + "(";
+                        for (size_t pi = 0; pi < sym->paramNames.size(); pi++) {
+                            if (pi > 0) detail += ", ";
+                            detail += sym->paramNames[pi];
+                        }
+                        detail += ")";
+                        break;
+                    case SymbolKind::Object:
+                        detail = "Obj " + sym->name;
+                        if (!sym->parentNames.empty()) detail += " : " + sym->parentNames[0];
+                        break;
+                    case SymbolKind::Method:   detail = "method " + sym->name; break;
+                    case SymbolKind::Import:   detail = "import \"" + sym->importPath + "\""; break;
+                    case SymbolKind::Parameter: detail = "param " + sym->name; break;
+                    default: detail = sym->name; break;
+                }
+                if (!sym->typeHint.empty()) detail += ": " + sym->typeHint;
+                item["detail"] = detail;
+
+                // Sort: same-scope items first.
+                item["sortText"] = std::to_string(sym->scopeLevel) + "_" + sym->name;
+                items.push_back(std::move(item));
             }
+        }
 
-            // Build detail string.
-            std::string detail;
-            switch (sym->kind) {
-                case SymbolKind::Variable:  detail = "let " + sym->name; break;
-                case SymbolKind::Constant:  detail = "const " + sym->name; break;
-                case SymbolKind::Function:
-                    detail = "func " + sym->name + "(";
-                    for (size_t pi = 0; pi < sym->paramNames.size(); pi++) {
-                        if (pi > 0) detail += ", ";
-                        detail += sym->paramNames[pi];
-                    }
-                    detail += ")";
-                    break;
-                case SymbolKind::Object:
-                    detail = "Obj " + sym->name;
-                    if (!sym->parentNames.empty()) {
-                        detail += " : " + sym->parentNames[0];
-                    }
-                    break;
-                case SymbolKind::Method:
-                    detail = "method " + sym->name;
-                    break;
-                case SymbolKind::Import:
-                    detail = "import \"" + sym->importPath + "\"";
-                    break;
-                case SymbolKind::Parameter:
-                    detail = "param " + sym->name;
-                    break;
-                default:
-                    detail = sym->name;
-                    break;
+    } else {
+        // ── GENERAL context: keywords + builtins + symbols ─────────────────
+        auto keywords = getKeywordCompletions();
+        for (auto& kw : keywords) items.push_back(std::move(kw));
+
+        auto builtins = getBuiltinCompletions();
+        for (auto& b : builtins) items.push_back(std::move(b));
+
+        // Visible symbols.
+        if (analyzer) {
+            int voraLine = line + 1;
+            int voraCol = character + 1;
+            auto visibleSymbols = analyzer->getVisibleSymbols(voraLine, voraCol);
+
+            for (auto* sym : visibleSymbols) {
+                nlohmann::json item;
+                item["label"] = sym->name;
+
+                switch (sym->kind) {
+                    case SymbolKind::Variable:  item["kind"] = 6;  break;
+                    case SymbolKind::Constant:  item["kind"] = 14; break;
+                    case SymbolKind::Function:  item["kind"] = 3;  break;
+                    case SymbolKind::Parameter: item["kind"] = 6;  break;
+                    case SymbolKind::Object:    item["kind"] = 7;  break;
+                    case SymbolKind::Method:    item["kind"] = 2;  break;
+                    case SymbolKind::Import:    item["kind"] = 9;  break;
+                    case SymbolKind::ForVar:    item["kind"] = 6;  break;
+                    case SymbolKind::CatchVar:  item["kind"] = 6;  break;
+                }
+
+                std::string detail;
+                switch (sym->kind) {
+                    case SymbolKind::Variable:  detail = "let " + sym->name; break;
+                    case SymbolKind::Constant:  detail = "const " + sym->name; break;
+                    case SymbolKind::Function:
+                        detail = "func " + sym->name + "(";
+                        for (size_t pi = 0; pi < sym->paramNames.size(); pi++) {
+                            if (pi > 0) detail += ", ";
+                            detail += sym->paramNames[pi];
+                        }
+                        detail += ")";
+                        break;
+                    case SymbolKind::Object:
+                        detail = "Obj " + sym->name;
+                        if (!sym->parentNames.empty()) detail += " : " + sym->parentNames[0];
+                        break;
+                    case SymbolKind::Method:   detail = "method " + sym->name; break;
+                    case SymbolKind::Import:   detail = "import \"" + sym->importPath + "\""; break;
+                    case SymbolKind::Parameter: detail = "param " + sym->name; break;
+                    default: detail = sym->name; break;
+                }
+                if (!sym->typeHint.empty()) detail += ": " + sym->typeHint;
+                item["detail"] = detail;
+
+                item["sortText"] = std::to_string(sym->scopeLevel) + "_" + sym->name;
+                items.push_back(std::move(item));
             }
-            if (!sym->typeHint.empty()) {
-                detail += ": " + sym->typeHint;
-            }
-            item["detail"] = detail;
-
-            // Sort: same-scope items first (use scope level as sort key).
-            item["sortText"] = std::to_string(sym->scopeLevel) + "_" + sym->name;
-
-            items.push_back(std::move(item));
         }
     }
 
@@ -1560,6 +1573,254 @@ nlohmann::json LspServer::getBuiltinCompletions() const {
         items.push_back(std::move(item));
     }
     return items;
+}
+
+// ── Expression-level keyword completions (values, not declarations) ──────────
+
+nlohmann::json LspServer::getExpressionKeywords() const {
+    static const std::vector<std::pair<const char*, const char*>> exprKeywords = {
+        {"true", "Boolean true"},
+        {"false", "Boolean false"},
+        {"null", "Null value"},
+        {"this", "Current object instance"},
+        {"super", "Parent class reference"},
+    };
+
+    nlohmann::json items = nlohmann::json::array();
+    for (auto& [word, desc] : exprKeywords) {
+        nlohmann::json item;
+        item["label"] = word;
+        item["kind"] = 14;  // Keyword
+        item["detail"] = desc;
+        item["insertText"] = word;
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
+// ── Type-specific method completions ─────────────────────────────────────────
+
+nlohmann::json LspServer::getTypeMethods(const std::string& typeName) const {
+    // Method definitions grouped by runtime type name.
+    // Keys match the strings returned by Vora's type() builtin.
+    struct MethodDef { const char* name; const char* desc; };
+    static const std::unordered_map<std::string, std::vector<MethodDef>> typeMethods = {
+        {"string", {
+            {"substring", "String method: extract substring"},
+            {"include", "String method: check if contains"},
+            {"startsWith", "String method: check prefix"},
+            {"endsWith", "String method: check suffix"},
+            {"upper", "String method: to uppercase"},
+            {"lower", "String method: to lowercase"},
+            {"trim", "String method: trim whitespace"},
+            {"replace", "String method: replace first occurrence"},
+            {"replaceAll", "String method: replace all occurrences"},
+            {"split", "String method: split by delimiter"},
+        }},
+        {"array", {
+            {"add", "Array method: add element"},
+            {"pop", "Array method: remove last element"},
+            {"insert", "Array method: insert at index"},
+            {"remove", "Array method: remove at index"},
+            {"indexOf", "Array method: find index of value"},
+            {"clear", "Array method: remove all elements"},
+            {"length", "Array length property"},
+        }},
+        {"dict", {
+            {"keys", "Dict method: get all keys"},
+            {"values", "Dict method: get all values"},
+            {"has", "Dict method: check if key exists"},
+        }},
+        {"set", {
+            {"add", "Set method: add element"},
+            {"has", "Set method: check if element exists"},
+            {"delete", "Set method: remove element"},
+            {"clear", "Set method: remove all elements"},
+            {"values", "Set method: get all values as array"},
+            {"size", "Set property: number of elements"},
+        }},
+        {"map", {
+            {"set", "Map method: set key-value pair"},
+            {"get", "Map method: get value by key"},
+            {"has", "Map method: check if key exists"},
+            {"delete", "Map method: remove key-value pair"},
+            {"clear", "Map method: remove all entries"},
+            {"keys", "Map method: get all keys"},
+            {"values", "Map method: get all values"},
+            {"size", "Map property: number of entries"},
+        }},
+    };
+
+    nlohmann::json items = nlohmann::json::array();
+    auto it = typeMethods.find(typeName);
+    if (it == typeMethods.end()) return items;
+
+    for (auto& [name, desc] : it->second) {
+        nlohmann::json item;
+        item["label"] = name;
+        item["kind"] = 2;  // Method
+        item["detail"] = desc;
+        item["insertText"] = name;
+        item["sortText"] = "0_" + std::string(name);  // highest priority
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
+nlohmann::json LspServer::getAllMethods() const {
+    // Fallback: return all methods for all types (current behavior).
+    nlohmann::json items = nlohmann::json::array();
+    static const std::vector<std::string> allTypes = {"string", "array", "dict", "set", "map"};
+    for (auto& t : allTypes) {
+        auto typeItems = getTypeMethods(t);
+        for (auto& item : typeItems) {
+            items.push_back(std::move(item));
+        }
+    }
+    return items;
+}
+
+// ── Context Detection ────────────────────────────────────────────────────────
+
+CompletionContext LspServer::detectCompletionContext(const std::string& text,
+                                                      int offset) const {
+    if (offset <= 0) return CompletionContext::GENERAL;
+
+    // ── Property access: cursor is right after '.' ────────────────────────
+    if (text[offset - 1] == '.') {
+        return CompletionContext::PROPERTY_ACCESS;
+    }
+
+    // ── String literal: cursor is inside "..." ────────────────────────────
+    // Walk backward to see if we're inside an unclosed string.
+    bool insideString = false;
+    for (int i = offset - 1; i >= 0; i--) {
+        char c = text[i];
+        if (c == '"') {
+            // Check if this quote is escaped.
+            int backslashes = 0;
+            int j = i - 1;
+            while (j >= 0 && text[j] == '\\') { backslashes++; j--; }
+            if (backslashes % 2 == 0) {
+                insideString = true;
+            }
+            break;
+        }
+        if (c == '\n') break;
+    }
+    if (insideString) return CompletionContext::STRING_LITERAL;
+
+    // ── Call argument: cursor is inside '(' ... ')' of a function call ────
+    // Walk backward from cursor, tracking paren balance.
+    int parenDepth = 0;
+    for (int i = offset - 1; i >= 0; i--) {
+        char c = text[i];
+        if (c == ')') parenDepth++;
+        else if (c == '(') {
+            if (parenDepth == 0) {
+                // Found opening paren. Check if it's a function call.
+                int j = i - 1;
+                while (j >= 0 && (text[j] == ' ' || text[j] == '\t')) j--;
+                if (j >= 0 && (std::isalnum(static_cast<unsigned char>(text[j]))
+                               || text[j] == '_' || text[j] == '$'
+                               || text[j] == ')' || text[j] == ']')) {
+                    return CompletionContext::CALL_ARGUMENT;
+                }
+                break;
+            }
+            parenDepth--;
+        }
+        else if (c == '\n' || c == '{' || c == '}' || c == ';') {
+            // Statement boundary — not inside a call on this line.
+            break;
+        }
+    }
+
+    return CompletionContext::GENERAL;
+}
+
+std::string LspServer::detectPrecedingType(const std::string& text, int dotOffset,
+                                            vora::SemanticAnalyzer* analyzer) const {
+    // dotOffset points to the '.' character (offset - 1 from cursor).
+    // Scan backward to find the start of the expression before '.'.
+
+    if (dotOffset <= 0) return "";
+
+    int end = dotOffset;
+    // Skip whitespace between identifier and dot (should be none, but be safe).
+    while (end > 0 && (text[end - 1] == ' ' || text[end - 1] == '\t')) end--;
+    if (end <= 0) return "";
+
+    int start = end;
+
+    // ── 1. Detect string literal: "..." . ─────────────────────────────────
+    if (text[start - 1] == '"') {
+        // Walk backward to verify it's a complete string literal.
+        int i = start - 2;
+        bool closed = false;
+        while (i >= 0) {
+            if (text[i] == '"') {
+                int backslashes = 0;
+                int j = i - 1;
+                while (j >= 0 && text[j] == '\\') { backslashes++; j--; }
+                if (backslashes % 2 == 0) {
+                    closed = true;
+                    break;
+                }
+            }
+            if (text[i] == '\n') break;
+            i--;
+        }
+        if (closed) return "string";
+    }
+
+    // ── 2. Detect array literal: [...] . ──────────────────────────────────
+    if (text[start - 1] == ']') {
+        return "array";
+    }
+
+    // ── 3. Detect dict literal: {...} . ───────────────────────────────────
+    if (text[start - 1] == '}') {
+        return "dict";
+    }
+
+    // ── 4. Extract preceding identifier ───────────────────────────────────
+    if (!std::isalnum(static_cast<unsigned char>(text[start - 1]))
+        && text[start - 1] != '_' && text[start - 1] != '$') {
+        return "";  // not an identifier
+    }
+
+    while (start > 0 && (std::isalnum(static_cast<unsigned char>(text[start - 1]))
+                         || text[start - 1] == '_' || text[start - 1] == '$')) {
+        start--;
+    }
+
+    std::string ident = text.substr(start, end - start);
+    if (ident.empty()) return "";
+
+    // ── 5. Look up typeHint from semantic analyzer ────────────────────────
+    if (analyzer) {
+        const auto& allSyms = analyzer->getVisibleSymbols(1, 0);  // get all symbols
+        // Actually, better to search the full symbol table directly.
+        // The analyzer has access to the symbol table.
+        // We'll use findSymbolAt or a direct lookup.
+        // For now, iterate visible symbols to find matching name.
+        for (auto* sym : allSyms) {
+            if (sym->name == ident && !sym->typeHint.empty()) {
+                // Normalize typeHint: Vora's type() returns lowercase.
+                std::string hint = sym->typeHint;
+                // Map common type annotations to runtime type names.
+                if (hint == "string" || hint == "str") return "string";
+                if (hint == "array" || hint == "Array" || hint == "list") return "array";
+                if (hint == "dict" || hint == "Dict" || hint == "object") return "dict";
+                if (hint == "set" || hint == "Set") return "set";
+                if (hint == "map" || hint == "Map") return "map";
+                return hint;  // return as-is for other types
+            }
+        }
+    }
+
+    return "";  // unknown type → fall back to all methods
 }
 
 // ── Go-to-Definition ────────────────────────────────────────────────────────
