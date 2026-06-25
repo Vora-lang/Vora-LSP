@@ -9,7 +9,7 @@
  *   - Diagnostics (parse errors / warnings on open and change)
  *   - Code formatting (document and selection)
  *   - Completion, go-to-definition, hover, document symbols
- *     (return empty results until semantic analysis is implemented)
+ *     (now powered by semantic analysis)
  */
 
 import * as path from 'path';
@@ -55,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
     };
 
     // ── Client configuration ────────────────────────────────────────────
+    const traceOutputChannel = vscode.window.createOutputChannel('Vora LSP Trace');
     const clientOptions: LanguageClientOptions = {
         documentSelector: [{ scheme: 'file', language: 'vora' }],
         synchronize: {
@@ -62,7 +63,7 @@ export function activate(context: vscode.ExtensionContext): void {
             fileEvents: vscode.workspace.createFileSystemWatcher('**/*.va'),
         },
         outputChannelName: 'Vora LSP',
-        traceOutputChannel: vscode.window.createOutputChannel('Vora LSP Trace'),
+        traceOutputChannel,
     };
 
     // ── Create and start the client ─────────────────────────────────────
@@ -73,7 +74,8 @@ export function activate(context: vscode.ExtensionContext): void {
         clientOptions,
     );
 
-    // Register commands.
+    // Register commands and dispose-on-deactivate resources.
+    context.subscriptions.push(traceOutputChannel);
     context.subscriptions.push(
         vscode.commands.registerCommand('vora.restartServer', async () => {
             await restartServer();

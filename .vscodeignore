@@ -7,3 +7,15 @@ src/**
 tsconfig.json
 **/*.ts
 !out/**
+
+# Build artifacts
+build/**
+*.exe
+*.obj
+*.o
+*.a
+*.lib
+
+# Docs/images not needed in the extension package
+vora_logo.png
+CLAUDE.md

@@ -304,20 +304,32 @@
             "patterns": [
                 {
                     "name": "meta.import.vora",
-                    "match": "\\b(import)\\s+(\"[^\"]*\")",
+                    "match": "\\b(import)\\s+(\"(?:[^\"\\\\]|\\\\.)*\")",
                     "captures": {
                         "1": { "name": "keyword.other.import.vora" },
                         "2": { "name": "string.quoted.double.vora" }
                     }
                 },
                 {
-                    "name": "meta.import-from.vora",
-                    "match": "\\b(from)\\s+(\"[^\"]*\")\\s+(import)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)",
+                    "name": "meta.import-alias.vora",
+                    "match": "\\b(import)\\s+(\"(?:[^\"\\\\]|\\\\.)*\")\\s+(as)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)",
                     "captures": {
                         "1": { "name": "keyword.other.import.vora" },
                         "2": { "name": "string.quoted.double.vora" },
                         "3": { "name": "keyword.other.import.vora" },
                         "4": { "name": "variable.other.readwrite.vora" }
+                    }
+                },
+                {
+                    "name": "meta.import-from.vora",
+                    "match": "\\b(from)\\s+(\"(?:[^\"\\\\]|\\\\.)*\")\\s+(import)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\\s*(\\b(as)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*))?",
+                    "captures": {
+                        "1": { "name": "keyword.other.import.vora" },
+                        "2": { "name": "string.quoted.double.vora" },
+                        "3": { "name": "keyword.other.import.vora" },
+                        "4": { "name": "variable.other.readwrite.vora" },
+                        "6": { "name": "keyword.other.import.vora" },
+                        "7": { "name": "variable.other.readwrite.vora" }
                     }
                 },
                 {

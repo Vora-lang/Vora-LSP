@@ -48,6 +48,13 @@ std::vector<Diagnostic> DiagnosticCollector::takeDiagnostics() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 LspServer::LspServer() {
+    // Set server version from build system (VORA_VERSION) or fallback.
+#ifdef VORA_VERSION
+    serverVersion_ = VORA_VERSION;
+#else
+    serverVersion_ = "0.1.0";
+#endif
+
     // ── Lifecycle ───────────────────────────────────────────────────────
     router_.registerRequest("initialize",
         [this](const nlohmann::json& p) { return handleInitialize(p); });
@@ -65,6 +72,8 @@ LspServer::LspServer() {
         [this](const nlohmann::json& p) { handleDidChange(p); });
     router_.registerNotification("textDocument/didClose",
         [this](const nlohmann::json& p) { handleDidClose(p); });
+    router_.registerNotification("textDocument/didSave",
+        [this](const nlohmann::json& p) { handleDidSave(p); });
 
     // ── Language features ───────────────────────────────────────────────
     router_.registerRequest("textDocument/completion",
@@ -167,10 +176,9 @@ nlohmann::json LspServer::handleShutdown(const nlohmann::json& /*params*/) {
 void LspServer::handleExit(const nlohmann::json& /*params*/) {
     log("exit");
     // Per LSP spec: exit notification after shutdown → terminate.
-    // std::_Exit() intentionally skips static destructors and atexit handlers
-    // that could hang or crash on unclean shutdown (e.g. dangling I/O threads).
-    // In this context the process is dead anyway — no resources leak.
-    std::_Exit(shutdown_ ? 0 : 1);
+    // Use std::exit() (not std::_Exit) so that destructors, atexit handlers,
+    // and I/O buffers are cleaned up properly during normal shutdown.
+    std::exit(shutdown_ ? 0 : 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -229,9 +237,14 @@ void LspServer::handleDidClose(const nlohmann::json& params) {
     nlohmann::json diagParams;
     diagParams["uri"] = uri;
     diagParams["diagnostics"] = nlohmann::json::array();
-    transport_.sendMessage(buildNotification("textDocument/publishDiagnostics", diagParams));
+    sendNotification("textDocument/publishDiagnostics", diagParams);
 
     log("didClose: " + uri);
+}
+
+void LspServer::handleDidSave(const nlohmann::json& /*params*/) {
+    // No-op: full text sync on didChange already handles content updates.
+    // The server re-parses on every didChange, so didSave requires no action.
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -537,6 +550,8 @@ nlohmann::json LspServer::handleHover(const nlohmann::json& params) {
         {"max", "**max**(array) → number\n\nReturns the maximum value in an array."},
         {"jsonParse", "**jsonParse**(string) → value\n\nParses a JSON string into a Vora value."},
         {"jsonStringify", "**jsonStringify**(value, indent?) → string\n\nSerializes a Vora value to a JSON string."},
+        {"random_int", "**random_int**(min, max) → int\n\nReturns a random integer in the range [min, max] (inclusive)."},
+        {"random_float", "**random_float**(min, max, decimals?) → float\n\nReturns a random float in the range [min, max). Optional `decimals` controls decimal places."},
     };
 
     auto biIt = builtinHovers.find(word);
@@ -763,20 +778,14 @@ nlohmann::json LspServer::handleDocumentSymbol(const nlohmann::json& params) {
         return symbols;
     }
 
-    // Fallback: parse and collect via AST walk.
-    DiagnosticCollector collector;
-    Lexer lexer(doc->text, collector);
-    auto tokens = lexer.scanTokens();
-
-    Parser parser(std::move(tokens), collector);
-    parser.setSource(doc->text);
-    auto program = parser.parse();
-
-    nlohmann::json symbols = nlohmann::json::array();
-    if (program) {
-        collectSymbolsFromProgram(*program, symbols);
+    // Fallback: reuse cached program from parseAndAnalyze if available.
+    // Avoid re-parsing when the original parse already failed (lex errors, etc.).
+    if (doc->cachedProgram) {
+        nlohmann::json symbols = nlohmann::json::array();
+        collectSymbolsFromProgram(*doc->cachedProgram, symbols);
+        return symbols;
     }
-    return symbols;
+    return nlohmann::json::array();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -901,7 +910,7 @@ void LspServer::publishDiagnostics(const std::string& uri) {
     params["uri"] = uri;
     params["diagnostics"] = std::move(lspDiags);
 
-    transport_.sendMessage(buildNotification("textDocument/publishDiagnostics", params));
+    sendNotification("textDocument/publishDiagnostics", params);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1054,70 +1063,6 @@ vora::SemanticAnalyzer* LspServer::analyzeImportedFile(const std::string& filePa
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Semantic diagnostics
-// ═══════════════════════════════════════════════════════════════════════════
-
-void LspServer::publishSemanticDiagnostics(const std::string& uri) {
-    auto* doc = getDocument(uri);
-    if (!doc) return;
-
-    parseAndAnalyze(uri);
-    if (!doc->cacheValid || !doc->cachedAnalyzer) return;
-
-    auto& analyzer = *doc->cachedAnalyzer;
-    nlohmann::json lspDiags = nlohmann::json::array();
-    (void)lspDiags;  // collected below — we append to the existing diagnostics
-
-    // Helper: convert a 1-based token to an LSP diagnostic.
-    auto makeDiag = [&](const Token& tok, const std::string& msg, int severity) {
-        int lspLine = (tok.line > 0) ? tok.line - 1 : 0;
-        int lspCol  = (tok.column > 0) ? tok.column - 1 : 0;
-        int len = static_cast<int>(tok.lexeme.size());
-        if (len == 0) len = 1;
-
-        nlohmann::json diag;
-        diag["range"]["start"]["line"] = lspLine;
-        diag["range"]["start"]["character"] = lspCol;
-        diag["range"]["end"]["line"] = lspLine;
-        diag["range"]["end"]["character"] = lspCol + len;
-        diag["severity"] = severity;
-        diag["source"] = "vora (semantic)";
-        diag["message"] = msg;
-        return diag;
-    };
-
-    nlohmann::json semanticDiags = nlohmann::json::array();
-
-    // ── Unused variables ───────────────────────────────────────────────
-    for (auto* sym : analyzer.getUnusedSymbols()) {
-        std::string msg = "Unused variable '" + sym->name + "'";
-        semanticDiags.push_back(makeDiag(sym->declToken, msg, 2));  // Warning
-    }
-
-    // ── Unreachable code ──────────────────────────────────────────────
-    for (auto& tok : analyzer.getUnreachableTokens()) {
-        semanticDiags.push_back(makeDiag(tok, "Unreachable code", 2));  // Warning
-    }
-
-    // ── Shadowed variables ────────────────────────────────────────────
-    for (auto& [inner, outer] : analyzer.getShadowedSymbols()) {
-        std::string msg = "Variable '" + inner->name +
-                          "' shadows declaration at line " +
-                          std::to_string(outer->declToken.line);
-        semanticDiags.push_back(makeDiag(inner->declToken, msg, 3));  // Hint
-    }
-
-    // Publish as separate notification (or merge with existing —
-    // for simplicity, we publish separately with a different source).
-    if (!semanticDiags.empty()) {
-        nlohmann::json params;
-        params["uri"] = uri;
-        params["diagnostics"] = std::move(semanticDiags);
-        transport_.sendMessage(buildNotification("textDocument/publishDiagnostics", params));
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // References
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1221,9 +1166,12 @@ nlohmann::json LspServer::handleSignatureHelp(const nlohmann::json& params) {
     const auto* symbol = doc->cachedAnalyzer->findSymbolAt(voraLine, voraCol);
     if (!symbol && !calleeName.empty()) {
         // Try resolving by name.
+        // Guard rfind against npos (calleeStart == 0 or no preceding newline).
+        auto rfindResult = doc->text.rfind('\n', calleeStart > 0 ? static_cast<size_t>(calleeStart - 1) : 0);
+        int calleeCol = calleeStart - static_cast<int>(rfindResult == std::string::npos ? 0 : rfindResult);
         symbol = doc->cachedAnalyzer->findDeclarationAt(
             static_cast<int>(std::count(doc->text.begin(), doc->text.begin() + calleeStart, '\n')) + 1,
-            calleeStart - static_cast<int>(doc->text.rfind('\n', calleeStart - 1)));
+            calleeCol);
         if (!symbol) {
             // Try the analyzer's table directly.
             const auto& allSyms = doc->cachedAnalyzer->getVisibleSymbols(voraLine, voraCol);
@@ -1279,6 +1227,11 @@ void LspServer::log(const std::string& message) {
     transport_.log("[Vora LSP] " + message);
 }
 
+void LspServer::sendNotification(const std::string& method,
+                                  const nlohmann::json& params) {
+    transport_.sendMessage(buildNotification(method, params));
+}
+
 DocumentState* LspServer::getDocument(const std::string& uri) {
     auto it = documents_.find(uri);
     return (it != documents_.end()) ? &it->second : nullptr;
@@ -1300,6 +1253,11 @@ int LspServer::lspPositionToOffset(const std::string& text, int line, int charac
     // Defensive: negative positions or empty text → clamp to start.
     if (text.empty() || line < 0 || character < 0) {
         return 0;
+    }
+    // Defensive: if line is beyond document bounds, clamp to end of text.
+    int totalLines = static_cast<int>(std::count(text.begin(), text.end(), '\n'));
+    if (line > totalLines) {
+        return static_cast<int>(text.size());
     }
     int currentLine = 0;
     int currentChar = 0;
@@ -1824,130 +1782,5 @@ std::string LspServer::detectPrecedingType(const std::string& text, int dotOffse
 }
 
 // ── Go-to-Definition ────────────────────────────────────────────────────────
-
-nlohmann::json LspServer::findDefinition(const std::string& source,
-                                          int searchLine, int searchCol) {
-    // Extract the word at the cursor position.
-    int offset = lspPositionToOffset(source, searchLine, searchCol);
-
-    // Find word boundaries.
-    int start = offset;
-    while (start > 0 && (std::isalnum(static_cast<unsigned char>(source[start - 1]))
-                         || source[start - 1] == '_' || source[start - 1] == '$')) {
-        start--;
-    }
-    int end = offset;
-    while (end < static_cast<int>(source.size())
-           && (std::isalnum(static_cast<unsigned char>(source[end]))
-               || source[end] == '_' || source[end] == '$')) {
-        end++;
-    }
-    std::string word = source.substr(start, end - start);
-    if (word.empty()) return nullptr;
-
-    // Parse the document and search for a declaration matching the word.
-    DiagnosticCollector collector;
-    Lexer lexer(source, collector);
-    auto tokens = lexer.scanTokens();
-    if (lexer.hasError()) return nullptr;
-
-    Parser parser(std::move(tokens), collector);
-    parser.setSource(source);
-    auto program = parser.parse();
-
-    // Walk all statements looking for a declaration whose name matches.
-    std::function<nlohmann::json(const Stmt*)> searchDecl =
-        [&](const Stmt* stmt) -> nlohmann::json {
-        if (!stmt) return nullptr;
-
-        if (auto* func = dynamic_cast<const FuncStmt*>(stmt)) {
-            if (func->name == word) {
-                nlohmann::json location;
-                location["uri"] = "";  // same file — filled by caller
-                location["range"] = tokenToLspRange(func->nameToken);
-                return location;
-            }
-        } else if (auto* obj = dynamic_cast<const ObjStmt*>(stmt)) {
-            if (obj->name == word) {
-                nlohmann::json location;
-                location["uri"] = "";
-                location["range"] = tokenToLspRange(obj->nameToken);
-                return location;
-            }
-        } else if (auto* let = dynamic_cast<const LetStmt*>(stmt)) {
-            if (let->name == word) {
-                nlohmann::json location;
-                location["uri"] = "";
-                location["range"] = tokenToLspRange(let->nameToken);
-                return location;
-            }
-        } else if (auto* exp = dynamic_cast<const ExportStmt*>(stmt)) {
-            if (exp->declaration) return searchDecl(exp->declaration.get());
-        }
-
-        // Recurse into block-like structures
-        if (auto* block = dynamic_cast<const BlockStmt*>(stmt)) {
-            for (auto& s : block->statements) {
-                auto result = searchDecl(s.get());
-                if (!result.is_null()) return result;
-            }
-        }
-        if (auto* ifStmt = dynamic_cast<const IfStmt*>(stmt)) {
-            if (ifStmt->thenBranch) {
-                auto r = searchDecl(ifStmt->thenBranch.get());
-                if (!r.is_null()) return r;
-            }
-            if (ifStmt->elseBranch) {
-                auto r = searchDecl(ifStmt->elseBranch.get());
-                if (!r.is_null()) return r;
-            }
-        }
-        if (auto* whileStmt = dynamic_cast<const WhileStmt*>(stmt)) {
-            if (whileStmt->body) return searchDecl(whileStmt->body.get());
-        }
-        if (auto* forStmt = dynamic_cast<const ForStmt*>(stmt)) {
-            if (forStmt->body) return searchDecl(forStmt->body.get());
-        }
-        if (auto* cforStmt = dynamic_cast<const CForStmt*>(stmt)) {
-            if (cforStmt->body) return searchDecl(cforStmt->body.get());
-        }
-        if (auto* funcStmt = dynamic_cast<const FuncStmt*>(stmt)) {
-            if (funcStmt->body) {
-                for (auto& s : funcStmt->body->statements) {
-                    auto r = searchDecl(s.get());
-                    if (!r.is_null()) return r;
-                }
-            }
-        }
-        if (auto* tryStmt = dynamic_cast<const TryStmt*>(stmt)) {
-            if (tryStmt->tryBlock) {
-                auto r = searchDecl(tryStmt->tryBlock.get());
-                if (!r.is_null()) return r;
-            }
-            if (tryStmt->catchBlock) {
-                auto r = searchDecl(tryStmt->catchBlock.get());
-                if (!r.is_null()) return r;
-            }
-            if (tryStmt->finallyBlock) {
-                auto r = searchDecl(tryStmt->finallyBlock.get());
-                if (!r.is_null()) return r;
-            }
-        }
-
-        return nullptr;
-    };
-
-    // Find all matching declarations and return the one "closest" (first one in
-    // source order that is at or before the cursor).
-    nlohmann::json bestMatch;
-    for (auto& s : program->statements) {
-        auto result = searchDecl(s.get());
-        if (!result.is_null()) {
-            bestMatch = std::move(result);
-            break;  // First match wins (top-level declarations)
-        }
-    }
-    return bestMatch;
-}
 
 }  // namespace vora::lsp

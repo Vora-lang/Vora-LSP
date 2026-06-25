@@ -65,6 +65,18 @@ target_include_directories(vora-lsp PRIVATE
 
 target_link_libraries(vora-lsp PRIVATE "${VORA_LIB}")
 
+# Extract Vora version from the Vora project's CMakeLists.txt.
+file(STRINGS "${VORA_ROOT}/CMakeLists.txt" VORA_PROJECT_LINE
+     REGEX "^project\\(Vora VERSION ")
+if(VORA_PROJECT_LINE MATCHES "VERSION ([0-9]+\\.[0-9]+\\.[0-9]+)")
+    set(VORA_VERSION "${CMAKE_MATCH_1}")
+else()
+    set(VORA_VERSION "0.1.0")
+endif()
+message(STATUS "Vora version: ${VORA_VERSION}")
+
+target_compile_definitions(vora-lsp PRIVATE VORA_VERSION="${VORA_VERSION}")
+
 target_compile_features(vora-lsp PRIVATE cxx_std_17)
 
 # ──────────────────────────────────────────────────

@@ -108,7 +108,7 @@ private:
 
     // ── Server info ─────────────────────────────────────────────────────
     std::string serverName_ = "Vora LSP";
-    std::string serverVersion_ = "0.1.0";
+    std::string serverVersion_;
 
     // ── Document store ──────────────────────────────────────────────────
     std::unordered_map<std::string, DocumentState> documents_;
@@ -130,6 +130,7 @@ private:
     void handleDidOpen(const nlohmann::json& params);
     void handleDidChange(const nlohmann::json& params);
     void handleDidClose(const nlohmann::json& params);
+    void handleDidSave(const nlohmann::json& params);
 
     // Language features
     nlohmann::json handleCompletion(const nlohmann::json& params);
@@ -142,7 +143,6 @@ private:
 
     // ── Diagnostics ─────────────────────────────────────────────────────
     void publishDiagnostics(const std::string& uri);
-    void publishSemanticDiagnostics(const std::string& uri);
 
     // ── Symbol collection ───────────────────────────────────────────────
     void collectSymbols(const Stmt* stmt, nlohmann::json& symbols);
@@ -160,10 +160,6 @@ private:
     std::string detectPrecedingType(const std::string& text, int dotOffset,
                                      vora::SemanticAnalyzer* analyzer) const;
 
-    // ── Definition ──────────────────────────────────────────────────────
-    nlohmann::json findDefinition(const std::string& source,
-                                   int searchLine, int searchCol);
-
     // ── Cross-file resolution ──────────────────────────────────────────
     std::string resolveImportPath(const std::string& currentUri,
                                    const std::string& importPath);
@@ -175,6 +171,8 @@ private:
 
     // ── Helpers ─────────────────────────────────────────────────────────
     void log(const std::string& message);
+    void sendNotification(const std::string& method,
+                          const nlohmann::json& params);
     DocumentState* getDocument(const std::string& uri);
     static nlohmann::json tokenToLspRange(const Token& token);
     static int lspPositionToOffset(const std::string& text, int line, int character);
