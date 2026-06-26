@@ -1310,11 +1310,12 @@ void LspServer::collectSymbols(const Stmt* stmt, nlohmann::json& symbols) {
     if (auto* func = dynamic_cast<const FuncStmt*>(stmt)) {
         nlohmann::json sym;
         sym["name"] = func->name;
-        sym["kind"] = 12;  // Function
+        sym["kind"] = func->isStatic ? 6 : 12;  // Method if static, Function otherwise
         sym["range"] = tokenToLspRange(func->nameToken);
         sym["selectionRange"] = tokenToLspRange(func->nameToken);
         // Build detail: signature
-        std::string detail = "func " + func->name + "(";
+        std::string detail = func->isStatic ? "this." : "";
+        detail += "func " + func->name + "(";
         for (size_t i = 0; i < func->params.size(); i++) {
             if (i > 0) detail += ", ";
             if (func->params[i].isRest) detail += "...";
@@ -1355,10 +1356,10 @@ void LspServer::collectSymbols(const Stmt* stmt, nlohmann::json& symbols) {
             if (auto* mf = dynamic_cast<const FuncStmt*>(m.get())) {
                 nlohmann::json child;
                 child["name"] = mf->name;
-                child["kind"] = 6;  // Method
+                child["kind"] = mf->isStatic ? 12 : 6;  // Function if static, Method otherwise
                 child["range"] = tokenToLspRange(mf->nameToken);
                 child["selectionRange"] = tokenToLspRange(mf->nameToken);
-                child["detail"] = "method " + mf->name;
+                child["detail"] = (mf->isStatic ? std::string("this.") : std::string("")) + "func " + mf->name;
                 children.push_back(std::move(child));
             }
         }
