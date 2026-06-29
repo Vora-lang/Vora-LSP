@@ -847,6 +847,7 @@ void LspServer::publishDiagnostics(const std::string& uri) {
 
         // Unused variables → warning.
         for (auto* sym : doc->cachedAnalyzer->getUnusedSymbols()) {
+            if (sym->name.empty()) continue;  // skip error-recovery artifacts
             diagnostics.push_back({
                 sym->declToken.line,
                 sym->declToken.column,
@@ -868,6 +869,7 @@ void LspServer::publishDiagnostics(const std::string& uri) {
 
         // Shadowed variables → hint.
         for (auto& [inner, outer] : doc->cachedAnalyzer->getShadowedSymbols()) {
+            if (inner->name.empty() || outer->name.empty()) continue;
             diagnostics.push_back({
                 inner->declToken.line,
                 inner->declToken.column,
