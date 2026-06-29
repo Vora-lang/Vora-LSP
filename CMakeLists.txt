@@ -29,8 +29,8 @@ set(VORA_BUILD "${VORA_ROOT}/build/windows-x64-debug"
 if(MSVC)
     find_library(VORA_LIB vora_lib
         PATHS
-            "${VORA_BUILD}/Debug"
             "${VORA_BUILD}/Release"
+            "${VORA_BUILD}/Debug"
         NO_DEFAULT_PATH
     )
 else()
