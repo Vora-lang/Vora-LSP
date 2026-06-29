@@ -91,6 +91,31 @@ export function activate(context: vscode.ExtensionContext): void {
         );
     });
 
+    // ── DAP Debug Adapter registration ─────────────────────────────────
+    context.subscriptions.push(
+        vscode.debug.registerDebugAdapterDescriptorFactory('vora', {
+            createDebugAdapterDescriptor(_session: vscode.DebugSession) {
+                // Use same directory as LSP server for the debug adapter binary
+                const dapConfig = vscode.workspace.getConfiguration('vora.dap');
+                const dapPath: string = dapConfig.get('serverPath', 'vora-dap');
+                const resolvedDapPath = path.isAbsolute(dapPath)
+                    ? dapPath
+                    : path.join(context.extensionPath, dapPath);
+                let binaryDapPath = resolvedDapPath;
+                if (!fs.existsSync(binaryDapPath) && process.platform === 'win32' && !binaryDapPath.endsWith('.exe')) {
+                    binaryDapPath = resolvedDapPath + '.exe';
+                }
+                if (!fs.existsSync(binaryDapPath)) {
+                    void vscode.window.showErrorMessage(
+                        `Vora: Debug adapter binary not found at "${resolvedDapPath}". ` +
+                        'Build the DAP server first, or set "vora.dap.serverPath" to the correct path.',
+                    );
+                }
+                return new vscode.DebugAdapterExecutable(binaryDapPath, []);
+            }
+        })
+    );
+
     // Show a status bar item.
     const statusBarItem = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,

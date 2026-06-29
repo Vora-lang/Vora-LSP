@@ -58,9 +58,57 @@
                         "verbose"
                     ],
                     "description": "Traces the communication between VS Code and the Vora LSP server."
+                },
+                "vora.dap.serverPath": {
+                    "type": "string",
+                    "default": "vora-dap",
+                    "description": "Path to the Vora DAP debug adapter executable."
                 }
             }
-        }
+        },
+        "debuggers": [
+            {
+                "type": "vora",
+                "label": "Vora Debug",
+                "languages": ["vora"],
+                "configurationAttributes": {
+                    "launch": {
+                        "properties": {
+                            "program": {
+                                "type": "string",
+                                "description": "Path to the .va file to debug.",
+                                "default": "${file}"
+                            },
+                            "stopOnEntry": {
+                                "type": "boolean",
+                                "description": "Stop at program entry.",
+                                "default": false
+                            }
+                        }
+                    }
+                },
+                "initialConfigurations": [
+                    {
+                        "type": "vora",
+                        "name": "Vora: Launch",
+                        "request": "launch",
+                        "program": "${file}"
+                    }
+                ],
+                "configurationSnippets": [
+                    {
+                        "label": "Vora: Launch",
+                        "description": "Debug a Vora script",
+                        "body": {
+                            "type": "vora",
+                            "name": "Vora: Launch",
+                            "request": "launch",
+                            "program": "^\"${1:\\$\\{file\\}}\""
+                        }
+                    }
+                ]
+            }
+        ]
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",

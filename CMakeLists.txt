@@ -18,7 +18,7 @@ endif()
 
 set(VORA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Vora"
     CACHE PATH "Path to the Vora repository root")
-set(VORA_BUILD "${VORA_ROOT}/build/windows-x64"
+set(VORA_BUILD "${VORA_ROOT}/build/windows-x64-debug"
     CACHE PATH "Path to the Vora build directory (containing vora_lib)")
 
 # ──────────────────────────────────────────────────
@@ -80,11 +80,39 @@ target_compile_definitions(vora-lsp PRIVATE VORA_VERSION="${VORA_VERSION}")
 target_compile_features(vora-lsp PRIVATE cxx_std_17)
 
 # ──────────────────────────────────────────────────
-# Copy binary to repo root for VS Code extension
+# DAP debug adapter server executable
+# ──────────────────────────────────────────────────
+add_executable(vora-dap
+    server/dap_main.cpp
+    server/dap_server.cpp
+    server/dap_server.h
+)
+
+target_include_directories(vora-dap PRIVATE
+    "${VORA_ROOT}/src"
+    "${VORA_ROOT}/include"
+    server
+)
+
+target_link_libraries(vora-dap PRIVATE "${VORA_LIB}")
+
+target_compile_definitions(vora-dap PRIVATE VORA_VERSION="${VORA_VERSION}")
+
+target_compile_features(vora-dap PRIVATE cxx_std_17)
+
+# ──────────────────────────────────────────────────
+# Copy binaries to repo root for VS Code extension
 # ──────────────────────────────────────────────────
 add_custom_command(TARGET vora-lsp POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:vora-lsp>"
         "${CMAKE_CURRENT_SOURCE_DIR}/$<TARGET_FILE_NAME:vora-lsp>"
     COMMENT "Copying vora-lsp binary to repo root for VS Code extension"
+)
+
+add_custom_command(TARGET vora-dap POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:vora-dap>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/$<TARGET_FILE_NAME:vora-dap>"
+    COMMENT "Copying vora-dap binary to repo root for VS Code extension"
 )
