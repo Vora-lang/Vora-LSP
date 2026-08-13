@@ -22,7 +22,7 @@ Vora-LSP/
 
 - **Diagnostics**: Real-time parse error reporting via `textDocument/publishDiagnostics`
 - **Formatting**: Document formatting via `textDocument/formatting` (uses Vora's `SourceFormatter`)
-- **Completion, go-to-definition, hover, document symbols**: Stubs returning empty — need semantic analysis (roadmap #4)
+- **Completion, go-to-definition, hover, document symbols**: Implemented via `SemanticAnalyzer` (scope-aware read-only AST analysis, no VM dependency). Also provides references and signature help.
 
 ## Building
 
