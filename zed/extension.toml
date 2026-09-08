@@ -1,0 +1,23 @@
+id = "vora"
+name = "Vora"
+description = "Vora language support for Zed — syntax highlighting, auto-indent, bracket matching"
+version = "0.1.0"
+schema_version = 1
+authors = [
+    "Vora-lang <https://github.com/Vora-lang>",
+]
+repository = "https://github.com/Vora-lang/Vora-LSP"
+homepage = "https://github.com/Vora-lang/Vora"
+license = "MIT"
+
+# Language directories bundled in this extension.
+languages = ["languages/vora"]
+
+# ── Tree-sitter grammar ──────────────────────────────────────────────
+# The tree-sitter-vora grammar lives in tree-sitter-vora/ next to this file.
+# Build WASM with: cd tree-sitter-vora && npx tree-sitter build --wasm
+# Copy output to: grammars/vora.wasm
+
+[grammars.vora]
+repository = "https://github.com/Vora-lang/tree-sitter-vora"
+rev = "main"

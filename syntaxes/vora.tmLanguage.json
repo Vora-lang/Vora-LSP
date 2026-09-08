@@ -170,6 +170,10 @@
                     "match": "&&|\\|\\||!"
                 },
                 {
+                    "name": "keyword.operator.bitwise.vora",
+                    "match": "<<|>>|[&|^~]|(?<!\\|)\\|(?!\\|)"
+                },
+                {
                     "name": "keyword.operator.arithmetic.vora",
                     "match": "\\*\\*|[+\\-*/%](?![+\\-*/%])"
                 },

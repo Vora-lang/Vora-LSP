@@ -6,3 +6,9 @@ build/
 .vscode/
 CLAUDE.md
 vora-lsp.exe
+
+# tree-sitter build artifacts
+zed/tree-sitter-vora/parser.exp
+zed/tree-sitter-vora/parser.lib
+zed/tree-sitter-vora/parser.obj
+zed/tree-sitter-vora/scanner.obj

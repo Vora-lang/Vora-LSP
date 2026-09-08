@@ -1,0 +1,32 @@
+name = "Vora"
+grammar = "vora"
+path_suffixes = ["va"]
+first_line_pattern = '^#!.*\b(?:vora)\b'
+line_comments = ["//"]
+block_comment = ["/*", "*/"]
+
+autoclose_before = ";:.,=}])>`\n "
+
+brackets = [
+  { start = "{", end = "}", close = true, newline = true },
+  { start = "[", end = "]", close = true, newline = true },
+  { start = "(", end = ")", close = true, newline = true },
+  { start = "\"", end = "\"", close = true, newline = false, not_in = ["string", "comment"] },
+  { start = "'", end = "'", close = true, newline = false, not_in = ["string", "comment"] },
+]
+
+word_characters = ["_", "$"]
+
+# Fallback indent rules — complement tree-sitter once grammar exists.
+# Handle incomplete structures (e.g. before typing closing brace).
+increase_indent_pattern = '^.*\{[^}"']*$'
+decrease_indent_pattern = '^\s*[}\])]'
+
+collapsed_placeholder = "{ ... }"
+
+[overrides.string]
+word_characters = ["_", "$", "-", "/", ".", ":", "#", "?", "=", "&", "+"]
+
+[overrides.comment]
+line_comments = []
+block_comment = []
