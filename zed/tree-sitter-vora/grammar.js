@@ -427,7 +427,7 @@ module.exports = grammar({
     assignment_expression: ($) =>
       prec.right(PREC.assignment, seq(
         field("left", choice($.identifier, $.member_expression, $.subscript_expression)),
-        field("operator", choice("=", "+=", "-=", "*=", "/=", "%=")),
+        field("operator", choice("=", "+=", "-=", "*=", "/=", "%=", "**=")),
         field("right", $._expression),
       )),
 

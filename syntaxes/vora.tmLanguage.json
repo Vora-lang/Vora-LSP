@@ -155,7 +155,7 @@
             "patterns": [
                 {
                     "name": "keyword.operator.assignment.compound.vora",
-                    "match": "\\+=|-=|\\*=|/=|%="
+                    "match": "\\*\\*=|\\+=|-=|\\*=|/=|%="
                 },
                 {
                     "name": "keyword.operator.increment.vora",
