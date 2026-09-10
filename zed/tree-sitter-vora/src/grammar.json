@@ -1148,7 +1148,7 @@
       "members": [
         {
           "type": "STRING",
-          "value": "Obj"
+          "value": "class"
         },
         {
           "type": "FIELD",
@@ -1199,6 +1199,14 @@
               "type": "BLANK"
             }
           ]
+        },
+        {
+          "type": "FIELD",
+          "name": "parameters",
+          "content": {
+            "type": "SYMBOL",
+            "name": "formal_parameters"
+          }
         },
         {
           "type": "FIELD",
@@ -1805,7 +1813,7 @@
               "members": [
                 {
                   "type": "STRING",
-                  "value": "Obj"
+                  "value": "class"
                 },
                 {
                   "type": "FIELD",
@@ -1856,6 +1864,14 @@
                       "type": "BLANK"
                     }
                   ]
+                },
+                {
+                  "type": "FIELD",
+                  "name": "parameters",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "formal_parameters"
+                  }
                 },
                 {
                   "type": "FIELD",

@@ -315,11 +315,16 @@ module.exports = grammar({
     // Class
     // ════════════════════════════════════════════════════════════════════
 
+    // `class Name [ : Parent1, Parent2 ] ( params ) { body }`
+    // The parameter list is required and holds the *child's* constructor
+    // parameters — in `class Dog : Animal(name, breed)` the parent is just
+    // `Animal`, and `(name, breed)` are Dog's own parameters.
     class_declaration: ($) =>
       seq(
-        "Obj",
+        "class",
         field("name", $.identifier),
         optional(seq(":", commaSep1($.identifier))),
+        field("parameters", $.formal_parameters),
         field("body", $.class_body),
       ),
 
@@ -404,7 +409,7 @@ module.exports = grammar({
           seq("func", field("name", $.identifier), field("parameters", $.formal_parameters), optional($.type_annotation), field("body", $.block_statement)),
           seq("let", field("name", $.identifier), optional($.type_annotation), "=", field("value", $._expression)),
           seq("const", field("name", $.identifier), optional($.type_annotation), "=", field("value", $._expression)),
-          seq("Obj", field("name", $.identifier), optional(seq(":", commaSep1($.identifier))), field("body", $.class_body)),
+          seq("class", field("name", $.identifier), optional(seq(":", commaSep1($.identifier))), field("parameters", $.formal_parameters), field("body", $.class_body)),
         ),
         optional(";"),
       ),

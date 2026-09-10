@@ -30,7 +30,7 @@
 
 ; ── Declaration keywords ─────────────────────────────────────────────────
 
-["let" "const" "func" "Obj"] @keyword
+["let" "const" "func" "class"] @keyword
 
 ; ── Control flow ─────────────────────────────────────────────────────────
 

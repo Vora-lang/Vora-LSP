@@ -1712,6 +1712,16 @@
             "named": true
           }
         ]
+      },
+      "parameters": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "formal_parameters",
+            "named": true
+          }
+        ]
       }
     },
     "children": {
@@ -7764,10 +7774,6 @@
     "named": false
   },
   {
-    "type": "Obj",
-    "named": false
-  },
-  {
     "type": "[",
     "named": false
   },
@@ -7797,6 +7803,10 @@
   },
   {
     "type": "catch",
+    "named": false
+  },
+  {
+    "type": "class",
     "named": false
   },
   {
