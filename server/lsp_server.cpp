@@ -338,7 +338,7 @@ nlohmann::json LspServer::handleCompletion(const nlohmann::json& params) {
                         detail += ")";
                         break;
                     case SymbolKind::Object:
-                        detail = "Obj " + sym->name;
+                        detail = "class " + sym->name;
                         if (!sym->parentNames.empty()) detail += " : " + sym->parentNames[0];
                         break;
                     case SymbolKind::Method:   detail = "method " + sym->name; break;
@@ -398,7 +398,7 @@ nlohmann::json LspServer::handleCompletion(const nlohmann::json& params) {
                         detail += ")";
                         break;
                     case SymbolKind::Object:
-                        detail = "Obj " + sym->name;
+                        detail = "class " + sym->name;
                         if (!sym->parentNames.empty()) detail += " : " + sym->parentNames[0];
                         break;
                     case SymbolKind::Method:   detail = "method " + sym->name; break;
@@ -503,7 +503,7 @@ nlohmann::json LspServer::handleHover(const nlohmann::json& params) {
         {"in", "**in** — used in for-in loops.\n\n`for item in iterable { body }`"},
         {"break", "**break** — exits the innermost loop."},
         {"continue", "**continue** — skips to the next iteration of the innermost loop."},
-        {"Obj", "**Obj** — declares a class-like object.\n\n`Obj Name : Parent(params) { this.prop = prop; func method() { ... } }`"},
+        {"class", "**class** — declares a class-like object.\n\n`class Name : Parent(params) { this.prop = prop; func method() { ... } }`"},
         {"this", "**this** — refers to the current object instance inside a method or constructor."},
         {"super", "**super** — refers to the parent class, used to call parent methods."},
         {"try", "**try** — begins an exception-handling block.\n\n`try { ... } catch (e) { ... } finally { ... }`"},
@@ -511,7 +511,7 @@ nlohmann::json LspServer::handleHover(const nlohmann::json& params) {
         {"finally", "**finally** — cleanup block that always executes after try/catch."},
         {"throw", "**throw** — throws an exception value.\n\n`throw \"error message\"` or `throw expression`"},
         {"import", "**import** — imports a module.\n\n`import \"path\"` or `import \"path\" as alias`"},
-        {"export", "**export** — exports a declaration from the current module.\n\n`export func`, `export let`, `export const`, `export Obj`"},
+        {"export", "**export** — exports a declaration from the current module.\n\n`export func`, `export let`, `export const`, `export class`"},
         {"from", "**from** — selective import.\n\n`from \"path\" import name1, name2`"},
         {"as", "**as** — aliases an import.\n\n`import \"path\" as alias`"},
         {"yield", "**yield** — suspends a generator function, returning a value.\n\n`yield value`"},
@@ -583,7 +583,7 @@ nlohmann::json LspServer::handleHover(const nlohmann::json& params) {
                     break;
                 }
                 case SymbolKind::Object: {
-                    hoverText = "**Obj " + symbol->name;
+                    hoverText = "**class " + symbol->name;
                     if (!symbol->parentNames.empty()) {
                         hoverText += " : ";
                         for (size_t i = 0; i < symbol->parentNames.size(); i++) {
@@ -1335,14 +1335,14 @@ void LspServer::collectSymbols(const Stmt* stmt, nlohmann::json& symbols) {
         return;
     }
 
-    // ── ObjStmt / exported Obj ───────────────────────────────────────────
-    if (auto* obj = dynamic_cast<const ObjStmt*>(stmt)) {
+    // ── ClassStmt / exported class ───────────────────────────────────────────
+    if (auto* obj = dynamic_cast<const ClassStmt*>(stmt)) {
         nlohmann::json sym;
         sym["name"] = obj->name;
         sym["kind"] = 5;  // Class
         sym["range"] = tokenToLspRange(obj->nameToken);
         sym["selectionRange"] = tokenToLspRange(obj->nameToken);
-        std::string detail = "Obj " + obj->name;
+        std::string detail = "class " + obj->name;
         if (!obj->parentNames.empty()) {
             detail += " : ";
             for (size_t i = 0; i < obj->parentNames.size(); i++) {
@@ -1466,7 +1466,7 @@ nlohmann::json LspServer::getKeywordCompletions() const {
         {"in", "For-in loop iterator"},
         {"break", "Exit loop"},
         {"continue", "Skip to next iteration"},
-        {"Obj", "Declare a class-like object"},
+        {"class", "Declare a class-like object"},
         {"this", "Current object instance"},
         {"super", "Parent class reference"},
         {"try", "Begin exception handling block"},
