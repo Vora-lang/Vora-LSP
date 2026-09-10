@@ -7,6 +7,7 @@
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
+        { "include": "#labels" },
         { "include": "#keywords" },
         { "include": "#constants" },
         { "include": "#builtin-functions" },
@@ -22,6 +23,27 @@
         { "include": "#punctuation" }
     ],
     "repository": {
+        "labels": {
+            "_comment": "Labeled loops and labeled break/continue (syntax-review #2.8). Must be matched before '#keywords', which would otherwise consume 'break'/'continue' on its own and leave the label unscoped.",
+            "patterns": [
+                {
+                    "name": "meta.labeled-jump.vora",
+                    "match": "\\b(break|continue)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\\b",
+                    "captures": {
+                        "1": { "name": "keyword.control.vora" },
+                        "2": { "name": "entity.name.label.vora" }
+                    }
+                },
+                {
+                    "name": "meta.labeled-loop.vora",
+                    "match": "\\b([a-zA-Z_$][a-zA-Z0-9_$]*)\\s*(:)(?=\\s*(?:for|while|do)\\b)",
+                    "captures": {
+                        "1": { "name": "entity.name.label.vora" },
+                        "2": { "name": "punctuation.separator.label.vora" }
+                    }
+                }
+            ]
+        },
         "comments": {
             "patterns": [
                 {

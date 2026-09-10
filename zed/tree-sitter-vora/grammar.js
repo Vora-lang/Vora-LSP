@@ -230,8 +230,19 @@ module.exports = grammar({
     // Loops
     // ════════════════════════════════════════════════════════════════════
 
+    // `name: for ...` — names a loop so `break name` / `continue name` can
+    // target it from any nesting depth (syntax-review #2.8).
+    // NOTE: newlines are extras in this grammar, so a label on `break` /
+    // `continue` cannot be restricted to the same line the way the compiler's
+    // ASI rule does. `break` on its own line followed by an identifier is
+    // therefore parsed as a labeled break here; the compiler still treats it as
+    // two statements. Editor-only approximation.
+    loop_label: ($) =>
+      seq(field("name", $.identifier), ":"),
+
     while_statement: ($) =>
       seq(
+        optional(field("label", $.loop_label)),
         "while", "(",
         field("condition", $._expression),
         ")",
@@ -240,6 +251,7 @@ module.exports = grammar({
 
     do_while_statement: ($) =>
       seq(
+        optional(field("label", $.loop_label)),
         "do",
         field("body", $._statement),
         "while", "(",
@@ -250,6 +262,7 @@ module.exports = grammar({
 
     for_in_statement: ($) =>
       seq(
+        optional(field("label", $.loop_label)),
         "for",
         field("variable", $.identifier),
         "in",
@@ -259,6 +272,7 @@ module.exports = grammar({
 
     c_style_for_statement: ($) =>
       seq(
+        optional(field("label", $.loop_label)),
         "for", "(",
         field("initializer", optional(choice($.let_declaration, $.const_declaration, $.expression_statement))),
         ";",
@@ -331,8 +345,14 @@ module.exports = grammar({
     // Break / Continue
     // ════════════════════════════════════════════════════════════════════
 
-    break_statement: ($) => token(seq("break", optional(";"))),
-    continue_statement: ($) => token(seq("continue", optional(";"))),
+    // prec.right: with both the label and the ';' optional the parser cannot
+    // decide at the identifier whether a ';' follows, and either reading
+    // accepts the same text.
+    break_statement: ($) =>
+      prec.right(seq("break", optional(field("label", $.identifier)), optional(";"))),
+
+    continue_statement: ($) =>
+      prec.right(seq("continue", optional(field("label", $.identifier)), optional(";"))),
 
     // ════════════════════════════════════════════════════════════════════
     // Try / Catch / Finally

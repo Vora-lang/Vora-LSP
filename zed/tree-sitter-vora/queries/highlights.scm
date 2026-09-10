@@ -36,11 +36,14 @@
 
 [
   "if" "else" "while" "for" "in" "do" "return" "yield"
-  "match" "defer"
+  "match" "defer" "break" "continue"
 ] @keyword
 
-(break_statement) @keyword
-(continue_statement) @keyword
+; Labeled loops / labeled break/continue
+(loop_label) @label
+(loop_label ":" @punctuation.delimiter)
+(break_statement (identifier) @label)
+(continue_statement (identifier) @label)
 
 ; ── Exceptions ───────────────────────────────────────────────────────────
 
