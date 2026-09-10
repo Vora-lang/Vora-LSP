@@ -56,7 +56,7 @@
 ["=" "+=" "-=" "*=" "/=" "%=" "**="] @operator
 
 ; Logical
-["&&" "||" "!"] @operator
+["&&" "||" "!" "and" "or" "not"] @operator
 
 ; Bitwise (P1-F; "|" doubles as match or-pattern separator)
 ["&" "|" "^" "~" "<<" ">>"] @operator

@@ -167,7 +167,7 @@
                 },
                 {
                     "name": "keyword.operator.logical.vora",
-                    "match": "&&|\\|\\||!"
+                    "match": "&&|\\|\\||!|\\b(and|or|not)\\b"
                 },
                 {
                     "name": "keyword.operator.bitwise.vora",

@@ -7104,6 +7104,10 @@
             "named": false
           },
           {
+            "type": "not",
+            "named": false
+          },
+          {
             "type": "~",
             "named": false
           }
@@ -7680,6 +7684,10 @@
     "named": false
   },
   {
+    "type": "and",
+    "named": false
+  },
+  {
     "type": "as",
     "named": false
   },
@@ -7772,12 +7780,20 @@
     "named": false
   },
   {
+    "type": "not",
+    "named": false
+  },
+  {
     "type": "null",
     "named": true
   },
   {
     "type": "number",
     "named": true
+  },
+  {
+    "type": "or",
+    "named": false
   },
   {
     "type": "return",

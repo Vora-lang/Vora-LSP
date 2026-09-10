@@ -2021,8 +2021,17 @@
                 }
               },
               {
-                "type": "STRING",
-                "value": "||"
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "||"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "or"
+                  }
+                ]
               },
               {
                 "type": "FIELD",
@@ -2050,8 +2059,17 @@
                 }
               },
               {
-                "type": "STRING",
-                "value": "&&"
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "&&"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "and"
+                  }
+                ]
               },
               {
                 "type": "FIELD",
@@ -2443,6 +2461,10 @@
                 {
                   "type": "STRING",
                   "value": "~"
+                },
+                {
+                  "type": "STRING",
+                  "value": "not"
                 }
               ]
             }

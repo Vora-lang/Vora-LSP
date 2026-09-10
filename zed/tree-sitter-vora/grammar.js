@@ -455,8 +455,8 @@ module.exports = grammar({
 
     binary_expression: ($) =>
       choice(
-        prec.left(PREC.logical_or, seq(field("left", $._expression), "||", field("right", $._expression))),
-        prec.left(PREC.logical_and, seq(field("left", $._expression), "&&", field("right", $._expression))),
+        prec.left(PREC.logical_or, seq(field("left", $._expression), choice("||", "or"), field("right", $._expression))),
+        prec.left(PREC.logical_and, seq(field("left", $._expression), choice("&&", "and"), field("right", $._expression))),
         // P1-F bitwise operators (int64 only in the runtime)
         prec.left(PREC.bitwise_or, seq(field("left", $._expression), field("operator", "|"), field("right", $._expression))),
         prec.left(PREC.bitwise_xor, seq(field("left", $._expression), field("operator", "^"), field("right", $._expression))),
@@ -473,7 +473,7 @@ module.exports = grammar({
 
     unary_expression: ($) =>
       prec(PREC.unary, seq(
-        field("operator", choice("-", "+", "!", "~")),
+        field("operator", choice("-", "+", "!", "~", "not")),
         field("argument", $._expression),
       )),
 
