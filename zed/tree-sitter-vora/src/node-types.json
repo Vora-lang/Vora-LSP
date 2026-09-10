@@ -833,6 +833,10 @@
             "named": false
           },
           {
+            "type": "in",
+            "named": false
+          },
+          {
             "type": "|",
             "named": false
           }
@@ -4235,7 +4239,7 @@
         ]
       },
       "pattern": {
-        "multiple": false,
+        "multiple": true,
         "required": true,
         "types": [
           {
@@ -4269,6 +4273,10 @@
           {
             "type": "wildcard_pattern",
             "named": true
+          },
+          {
+            "type": "|",
+            "named": false
           }
         ]
       }

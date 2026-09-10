@@ -464,6 +464,8 @@ module.exports = grammar({
         prec.left(PREC.shift, seq(field("left", $._expression), field("operator", choice("<<", ">>")), field("right", $._expression))),
         prec.left(PREC.equality, seq(field("left", $._expression), field("operator", choice("==", "!=")), field("right", $._expression))),
         prec.left(PREC.comparison, seq(field("left", $._expression), field("operator", choice("<", "<=", ">", ">=")), field("right", $._expression))),
+        // `x in xs` — membership test (P1-G); shares precedence with relational.
+        prec.left(PREC.comparison, seq(field("left", $._expression), field("operator", "in"), field("right", $._expression))),
         prec.left(PREC.addition, seq(field("left", $._expression), field("operator", choice("+", "-")), field("right", $._expression))),
         prec.left(PREC.multiplication, seq(field("left", $._expression), field("operator", choice("*", "/", "%")), field("right", $._expression))),
         prec.right(PREC.power, seq(field("left", $._expression), "**", field("right", $._expression))),
@@ -574,11 +576,16 @@ module.exports = grammar({
 
     match_arm: ($) =>
       seq(
-        field("pattern", $._match_pattern),
+        field("pattern", $._match_pattern_alternation),
         "=>",
         field("body", choice($._expression, $.block_statement)),
         optional(","),
       ),
+
+    // `1 | 2 | 3 => ...` — or-pattern (P1-B). `|` is also the bitwise OR
+    // operator in expressions; inside a match arm it separates patterns.
+    _match_pattern_alternation: ($) =>
+      seq($._match_pattern, repeat(seq("|", $._match_pattern))),
 
     _match_pattern: ($) =>
       choice(
