@@ -50,7 +50,7 @@
                     "patterns": [
                         {
                             "name": "constant.character.escape.vora",
-                            "match": "\\\\[\\\\\"'0nrbt]"
+                            "match": "\\\\[\\\\\"'0nrbt$]"
                         },
                         {
                             "name": "constant.character.escape.unicode.vora",
@@ -73,7 +73,7 @@
                     "patterns": [
                         {
                             "name": "constant.character.escape.vora",
-                            "match": "\\\\[\\\\\"'0nrbt]"
+                            "match": "\\\\[\\\\\"'0nrbt$]"
                         }
                     ]
                 }
